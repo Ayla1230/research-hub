@@ -416,7 +416,16 @@ class Store:
                     raise ValidationError(f"op #{index + 1}: {e}") from None
                 except sqlite3.IntegrityError as e:
                     raise ValidationError(f"op #{index + 1}: {e}") from None
-        for entity in sorted(touched):
+        uploads = (self.root / "uploads").resolve()
+        for item in touched:
+            if isinstance(item, tuple) and item[0] == "unlink":
+                try:
+                    stored = (uploads / item[1]).resolve()
+                    if stored.is_relative_to(uploads) and stored != uploads:
+                        stored.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        for entity in sorted(e for e in touched if isinstance(e, str)):
             self.emit({"type": "changed", "entity": entity})
         return results
 
@@ -524,12 +533,9 @@ class Store:
                 raise ValidationError("the pipeline needs at least one stage")
             db.execute(f"DELETE FROM {table} WHERE id=?", (eid,))
             if entity == "file":
-                stored = self.root / "uploads" / row["stored"]
-                try:
-                    if stored.resolve().is_relative_to((self.root / "uploads").resolve()):
-                        stored.unlink(missing_ok=True)
-                except OSError:
-                    pass
+                # Remove the stored file only after the transaction commits (see apply_ops);
+                # dry runs and failed batches must never touch the disk.
+                touched.add(("unlink", row["stored"]))
             self._log(db, actor, "delete", entity, eid, _label(entity, row))
             touched.add(entity)
             return {"op": "delete", "entity": entity, "id": eid}
@@ -622,6 +628,12 @@ class Store:
                 conn.close()
 
     def decide(self, pid: int, approve: bool, ops: list[dict] | None = None) -> dict:
+        # Hold the store lock for the whole check-apply-mark sequence so two
+        # concurrent approvals of one proposal cannot both apply it.
+        with self._lock:
+            return self._decide(pid, approve, ops)
+
+    def _decide(self, pid: int, approve: bool, ops: list[dict] | None) -> dict:
         with self.db() as db:
             row = db.execute("SELECT * FROM proposals WHERE id=?", (pid,)).fetchone()
         if not row:

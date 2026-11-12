@@ -112,6 +112,36 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.store.decide(pid, True)
 
+    def test_dry_run_and_failed_batch_keep_files(self):
+        (Path(self.dir) / "uploads" / "keep.txt").write_text("x")
+        fid = self.store.apply_ops([{"op": "create", "entity": "file", "data": {"name": "keep.txt", "stored": "keep.txt"}}],
+                                   allow_internal=True)[0]["id"]
+        pid = self.store.propose("agent", "delete", [{"op": "delete", "entity": "file", "id": fid}])["id"]
+        self.assertTrue((Path(self.dir) / "uploads" / "keep.txt").exists())
+        with self.assertRaises(ValidationError):
+            self.store.apply_ops([{"op": "delete", "entity": "file", "id": fid}, {"op": "create", "entity": "nope"}])
+        self.assertTrue((Path(self.dir) / "uploads" / "keep.txt").exists())
+        self.store.decide(pid, True)
+        self.assertFalse((Path(self.dir) / "uploads" / "keep.txt").exists())
+
+    def test_concurrent_approve_applies_once(self):
+        pid = self.store.propose("agent", "x", [{"op": "create", "entity": "rq", "data": {"text": "once"}}])["id"]
+        errors = []
+
+        def go():
+            try:
+                self.store.decide(pid, True)
+            except ValidationError as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=go) for _ in range(6)]
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+        self.assertEqual(len(self.store.snapshot()["rqs"]), 1)
+        self.assertEqual(len(errors), 5)
+
     def test_partial_approval_must_be_subset(self):
         ops = [{"op": "create", "entity": "rq", "data": {"text": "agent"}}]
         pid = self.store.propose("agent", "x", ops)["id"]
