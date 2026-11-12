@@ -439,12 +439,14 @@
       el("p.hint-line.grow", null, rels.length ? t("model_hint_paths") : t("model_hint")),
       el("div.tool-group", null,
         H.btn(t("fw_from_text"), { icon: "sparkle", variant: "primary", small: true, onclick: () => H.openFramework() }),
+        H.btn(t("pm_button"), { icon: "grid", variant: "outline", small: true, onclick: () => H.openProcessModels() }),
         H.btn(t("fw_add_rel"), { icon: "plus", variant: "ghost", small: true, disabled: H.state.variables.length < 2, onclick: () => H.editRelation(null) }),
         // the download is a clean figure for the thesis: no paper-count badges or RQ markers
         svg ? H.btn(t("fw_download"), { icon: "download", variant: "ghost", small: true, onclick: () =>
           H.downloadSvg(rels.length ? H.pathModelSvg(H.state.variables, rels, { idSuffix: "-dl" }) : svg, "research-model.svg") }) : null));
     if (!svg) return el("div", null, tools, el("div.empty-state", null, H.icon("layers", 22), el("p", null, t("model_empty_text")),
       el("div.toolbar", null, H.btn(t("fw_from_text"), { icon: "sparkle", variant: "primary", onclick: () => H.openFramework() }),
+        H.btn(t("pm_button"), { icon: "grid", variant: "outline", onclick: () => H.openProcessModels() }),
         H.btn(t("add_variable"), { icon: "plus", variant: "ghost", onclick: () => H.editVariable(null, "iv") }))));
     return el("div", null, tools, el("div.model-wrap", null, svg),
       el("div.legend", null, ["iv", "med", "mod", "dv", "ctrl"].map((r) => el("span.legend-item", null, el("i.sw.role-" + r), roleLabel(r))),

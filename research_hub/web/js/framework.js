@@ -93,13 +93,17 @@
       pos.set(v.id, { x: left, y: 34, w: zW });
       lastRight = left + zW;
     }
-    for (const m of mods) {
+    // moderators of an effect first, then moderators of a moderation (three-way interaction, "moderated moderation")
+    const modIds = new Set(mods.map((m) => m.id));
+    const ordered = [...mods.filter((m) => !modIds.has(m.moderates_id)), ...mods.filter((m) => modIds.has(m.moderates_id))];
+    for (const m of ordered) {
       const z = box(m.source_id);
       if (!z) continue;
       const to = midpoint.get(m.moderates_id) || (box(m.target_id) ? { x: box(m.target_id).cx, y: box(m.target_id).t } : null);
       if (!to) continue;
       const endY = to.y - (midpoint.has(m.moderates_id) ? 12 : 2);
       const midY = (z.b + endY) / 2;
+      midpoint.set(m.id, { x: (z.cx + to.x) / 2 + (z.cx === to.x ? 0 : (to.x - z.cx) * 0.18), y: midY + 12 });
       edges.push({ rel: m, kind: "moderates", neg: false, text: relLabel(m), mid: { x: (z.cx + to.x) / 2, y: midY },
         d: `M${z.cx} ${z.b} C ${z.cx} ${midY}, ${to.x} ${midY}, ${to.x} ${endY}`,
         pts: Math.abs(z.cx - to.x) < 2 ? [[z.cx, z.b], [to.x, endY]] : [[z.cx, z.b], [z.cx, midY], [to.x, midY], [to.x, endY]] });

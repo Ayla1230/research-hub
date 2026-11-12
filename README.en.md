@@ -107,6 +107,10 @@ In **Research core → Research model**, choose **From my writing** and paste or
 - **The research model** is drawn from the hypothesis paths: labels and direction on each line, negative paths dashed red, moderators pointing at the path they moderate, and paths that skip a column routed above the boxes. Paths can also be added by hand.
 - **Download SVG** gives a clean vector figure (no paper counts or RQ markers) for the thesis or slides.
 
+### PROCESS model templates
+
+The Research model tab offers 26 common models by their PROCESS number (Hayes): moderation (1–3), mediation (4, 6) and conditional process models (5, 7–22, 28, 29, 58, 59), with preview and one-click apply, including three-way interactions and several mediators. Diagrams are drawn by the hub from the model structure; check Hayes (2022), Appendix A, before analysing. Models 60–76 and 80–92 are not included.
+
 ## PowerPoint export
 
 **Make slides** on the dashboard (or in the Writing stage) opens the **slide design instructions** window:
