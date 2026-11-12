@@ -1,6 +1,6 @@
 # Research Hub · 研究進度中樞
 
-<p align="center"><b>A local thesis-progress manager built around PaperRead.</b><br>
+<p align="center"><b>A local thesis-progress manager.</b><br>
 One line of nodes from topic to publication; research questions, variables, papers, databases, local folders, MCP agents and Python analysis code in one place.</p>
 
 <p align="center"><a href="README.md">繁體中文</a> · <b>English</b></p>
@@ -30,9 +30,9 @@ Data lives in `~/ResearchHub` by default (`--data <folder>` or `RESEARCH_HUB_HOM
 | **Research core** | A dedicated board for RQs, variables (X independent, Y dependent, M mediator, Z moderator, C control) and papers. Every variable links to its papers with a relation (supports, contradicts, mixed, defines, measure source, mentions); variables without literature support are flagged. |
 | **Variable × paper matrix** | See at a glance which papers back which variable; click a cell to cycle the relation. |
 | **Research model** | Draws the X → M → Y model with moderators and controls from variable roles. |
-| **Literature** | OpenAlex search, BibTeX/RIS import & export (duplicates skipped by DOI, cite key or title), reading status, rating, tags, open local PDF, open in PaperRead. |
-| **Integration hub** | One-click search across databases (Google Scholar, Semantic Scholar, arXiv, PubMed, Scopus, Web of Science, Airiti, NDLTD — add your own with `{q}` in the URL); scan and import local reference folders; sync a PaperRead library; MCP tool registry; Python code folder and script runs; all uploaded files. |
-| **Live updates + confirmation** | When an agent finishes a task, a new file appears in a watched folder, or a PaperRead sync finds new papers or variables, the change waits in the **Inbox**. You approve it (optionally only some of its changes) before anything is written. The dashboard refreshes live over Server-Sent Events. |
+| **Literature** | OpenAlex search, BibTeX/RIS import & export (duplicates skipped by DOI, cite key or title), reading status, rating, tags, open local PDF. |
+| **Integration hub** | One-click search across databases (Google Scholar, Semantic Scholar, arXiv, PubMed, Scopus, Web of Science, Airiti, NDLTD — add your own with `{q}` in the URL); scan and import local reference folders; MCP tool registry; Python code folder and script runs; all uploaded files. |
+| **Live updates + confirmation** | When an agent finishes a task, a new file appears in a watched folder, or literature tracking finds related new papers, the change waits in the **Inbox**. You approve it (optionally only some of its changes) before anything is written. The dashboard refreshes live over Server-Sent Events. |
 | **Activity & backup** | Every change records who made it (you, an agent, the folder watcher) and when; export a full JSON backup or BibTeX. |
 
 ## Upload & progress check-in (v1.1)
@@ -87,13 +87,6 @@ When you untick a "create" while reviewing, changes that refer to it are unticke
 
 Operations: `create` / `update` (optionally `"append": {"notes": "…"}`) / `delete` on `stage`, `task`, `rq`, `variable`, `paper`, `resource`; `link` / `unlink` for `rq_variable`, `rq_paper`, `variable_paper`. Within one batch, `"ref": "p1"` names a new object and `"$p1"` refers to it.
 
-## PaperRead integration
-
-- **Links**: set the PaperRead URL (default `http://127.0.0.1:8765`); papers synced from PaperRead get an "Open in PaperRead" button.
-- **Sync**: set the PaperRead library folder (default `~/PaperRead/library`). "Sync library" reads each paper's `paper.json` / `item.json` read-only and turns new papers, reading-status changes and the variables PaperRead extracted (independent, dependent, mediator, moderator, control) into one proposal, with variable–paper links.
-- Re-syncing never duplicates: a new sync replaces an unconfirmed older one, existing papers and the relations you set are kept, and unreadable folders are skipped and listed.
-- Research Hub never writes to PaperRead's files.
-
 ## Python code
 
 Point Settings at your analysis project; the hub lists its `.py` / `.ipynb` files. With "Allow running .py scripts" enabled (off by default) you can run a script and read its output (current Python interpreter, working directory = code folder, with a timeout).
@@ -103,7 +96,7 @@ Point Settings at your analysis project; the hub lists its `.py` / `.ipynb` file
 - Listens on `127.0.0.1` and checks the Host header (DNS rebinding). There is no login — never expose it to the Internet.
 - Every dashboard request carries a per-process page token, so other websites cannot write.
 - Agents use a separate, rotatable agent token that can only read and propose.
-- Local files are read only inside configured folders (reference folders, code folder, PaperRead library) and the uploads folder.
+- Local files are read only inside configured folders (reference folders, code folder) and the uploads folder.
 - Workspace contents: `hub.sqlite3` (all structured data) and `uploads/` (files, one folder per stage).
 
 ## System maps

@@ -88,15 +88,11 @@ DEFAULT_RESOURCES = [
     {"kind": "database", "name": "Web of Science", "target": "https://www.webofscience.com/wos/woscc/basic-search"},
     {"kind": "database", "name": "華藝線上圖書館 Airiti Library", "target": "https://www.airitilibrary.com/"},
     {"kind": "database", "name": "臺灣博碩士論文知識加值系統 NDLTD", "target": "https://ndltd.ncl.edu.tw/"},
-    {"kind": "paperread", "name": "PaperRead", "target": "http://127.0.0.1:8765",
-     "notes": "PaperRead reader — open papers, translations and annotations."},
 ]
 
 DEFAULT_SETTINGS = {
     "project_title": "我的研究 · My Research",
     "language": "zh",
-    "paperread_url": "http://127.0.0.1:8765",
-    "paperread_library": "~/PaperRead/library",
     "reference_folders": [],
     "code_dir": "",
     "allow_code_run": False,

@@ -161,7 +161,7 @@ class StoreTests(unittest.TestCase):
             self.store.propose("agent", "x", [{"op": "delete", "entity": "file", "id": 1}])
         with self.assertRaises(ValidationError):
             self.store.apply_ops([{"op": "update", "entity": "file", "id": 1, "data": {"stored": "../x"}}])
-        for bad in ({"language": "fr"}, {"paperread_url": "javascript:alert(1)"}, {"agent_token": "x"}, {"openalex_mailto": "nope"}):
+        for bad in ({"language": "fr"}, {"ai_base_url": "javascript:alert(1)"}, {"agent_token": "x"}, {"openalex_mailto": "nope"}):
             with self.subTest(bad=bad), self.assertRaises(ValidationError):
                 self.store.save_settings(bad)
         self.assertEqual(self.store.save_settings({"code_timeout": -5})["code_timeout"], 10)
@@ -206,6 +206,17 @@ class StoreTests(unittest.TestCase):
         self.store.listeners.append(seen.append)
         self.store.apply_ops([{"op": "create", "entity": "rq", "data": {"text": "Why?"}}])
         self.assertIn({"type": "changed", "entity": "rq"}, seen)
+
+    def test_old_paperread_settings_cleaned_up(self):
+        with self.store.db() as db:
+            db.execute("INSERT INTO settings (k, v) VALUES ('paperread_url', '\"http://127.0.0.1:8765\"')")
+            db.execute("INSERT INTO resources (kind, name, target, created, updated) VALUES ('paperread', 'PaperRead', 'http://127.0.0.1:8765', 'x', 'x')")
+            db.execute("INSERT INTO resources (kind, name, target, created, updated) VALUES ('paperread', 'My reader', 'http://lab', 'x', 'x')")
+        store = Store(Path(self.dir))  # reopening runs the cleanup
+        self.assertNotIn("paperread_url", store.settings())
+        kinds = {r["name"]: r["kind"] for r in store.snapshot()["resources"]}
+        self.assertNotIn("PaperRead", kinds)
+        self.assertEqual(kinds["My reader"], "link")
 
     def test_demo(self):
         self.assertTrue(demo.apply(self.store))
@@ -327,56 +338,6 @@ class IntegrationTests(unittest.TestCase):
             self.assertTrue(integ.inside(d / "sub" / "Smith_2020_Trust.pdf", [d]))
             self.assertFalse(integ.inside(Path("/etc/passwd"), [d]))
             self.assertFalse(integ.inside(d / ".." / "x", [d]))
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
-
-    def test_paperread_sync(self):
-        d = Path(tempfile.mkdtemp())
-        try:
-            p = d / "abc123"
-            p.mkdir()
-            (p / "paper.json").write_text(json.dumps({"meta": {"title_en": "PR paper", "date": "2022 年", "doi": "10.9/abc"},
-                "variables": {"items": [{"role": "iv", "en": "Trust", "zh": "信任"}, {"role": "dv", "en": "Intention"}]}}), encoding="utf-8")
-            (p / "item.json").write_text(json.dumps({"status": "reading", "tags": ["t1"]}), encoding="utf-8")
-            (d / "broken").mkdir()
-            (d / "broken" / "paper.json").write_text("{not json", encoding="utf-8")
-            (d / "weird").mkdir()
-            (d / "weird" / "paper.json").write_text(json.dumps({"meta": {"title_en": "Weird", "authors": ["A", "B"]},
-                "variables": [{"role": "mod", "en": "Age"}, "junk"]}), encoding="utf-8")
-            (d / "weird" / "item.json").write_text(json.dumps({"tags": "ai, trust", "status": ["x"]}), encoding="utf-8")
-            (d / "array").mkdir()
-            (d / "array" / "paper.json").write_text("[1, 2]", encoding="utf-8")
-            skipped = []
-            items = integ.paperread_items(str(d), skipped)
-            self.assertEqual(sorted(skipped), ["array", "broken"])
-            weird = next(i for i in items if i["paperread_id"] == "weird")
-            self.assertEqual((weird["authors"], weird["tags"], weird["status"]), ("A ; B", "ai, trust", "to_read"))
-            self.assertEqual(weird["variables"], [{"role": "mod", "en": "Age", "zh": "", "abbr": ""}])
-            items = [i for i in items if i["paperread_id"] == "abc123"]
-            item = next(i for i in items if i["paperread_id"] == "abc123")
-            self.assertEqual((item["year"], item["status"]), (2022, "reading"))
-            dd = tempfile.mkdtemp()
-            store = Store(Path(dd))
-            store.apply_ops([{"op": "create", "entity": "variable", "data": {"symbol": "X1", "name_en": "trust"}}])
-            snap = store.snapshot()
-            ops, stats = integ.paperread_sync_ops([item], snap["papers"], snap["variables"])
-            self.assertEqual(stats, {"new": 1, "status": 0, "variables": 1})
-            store.propose("t", "sync", ops)  # must validate
-            store.decide(store.list_proposals()[0]["id"], True)
-            snap = store.snapshot()
-            self.assertEqual({v["symbol"] for v in snap["variables"]}, {"X1", "Y1"})
-            self.assertEqual(len(snap["variable_papers"]), 2)
-            # user sets evidence; a re-sync must neither duplicate nor overwrite it
-            store.apply_ops([{"op": "link", "link": "variable_paper", "a": snap["variable_papers"][0]["variable_id"],
-                              "b": snap["variable_papers"][0]["paper_id"], "data": {"evidence": "supports"}}])
-            snap = store.snapshot()
-            ops2, stats2 = integ.paperread_sync_ops([item], snap["papers"], snap["variables"], snap["variable_papers"])
-            self.assertEqual((ops2, stats2), ([], {"new": 0, "status": 0, "variables": 0}))
-            ops3, _ = integ.paperread_sync_ops([item], [], [])
-            with self.assertRaises(ValidationError):  # duplicate PaperRead paper is refused at apply time
-                store.apply_ops(ops3)
-            self.assertIn("supports", {l["evidence"] for l in store.snapshot()["variable_papers"]})
-            shutil.rmtree(dd, ignore_errors=True)
         finally:
             shutil.rmtree(d, ignore_errors=True)
 

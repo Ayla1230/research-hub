@@ -1,2 +1,2 @@
-"""Research Hub — a local research-progress dashboard built around PaperRead."""
+"""Research Hub — a local thesis-progress dashboard (研究進度中樞)."""
 __version__ = "1.1.0"

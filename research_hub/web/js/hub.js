@@ -2,7 +2,7 @@
 (function () {
   const H = window.H;
   const { el, t } = H;
-  const KIND_ICON = { database: "database", folder: "folder", mcp: "plug", code: "code", link: "link", paperread: "book" };
+  const KIND_ICON = { database: "database", folder: "folder", mcp: "plug", code: "code", link: "link" };
 
   /* ================= resources ================= */
   H.resourceRow = function (r) {
@@ -80,7 +80,7 @@
           try { scan = await H.api("/api/scan"); H.render.hub(); } catch (e) { H.toast(e.message, "error"); }
         } }),
         H.btn(t("scan_new"), { icon: "inbox", small: true, variant: "ghost", onclick: async () => {
-          try { const out = await H.api("/api/watch/scan", { body: {} }); H.toast(out.proposal ? t("pr_synced") : t("nothing_new"), out.proposal ? "ok" : "info"); }
+          try { const out = await H.api("/api/watch/scan", { body: {} }); H.toast(out.proposal ? t("sent_inbox") : t("nothing_new"), out.proposal ? "ok" : "info"); }
           catch (e) { H.toast(e.message, "error"); }
         } }));
       body.append(row);
@@ -103,28 +103,6 @@
       }
     }
     return card("folder", t("ref_folders"), null, body);
-  }
-
-  let prStatus = null;
-  async function loadPr() { try { prStatus = await H.api("/api/paperread/status"); } catch (e) { prStatus = { error: e.message }; } H.render.hub(); }
-  function paperreadCard() {
-    if (!prStatus) setTimeout(loadPr, 0);
-    const s = H.state.settings;
-    const online = prStatus && prStatus.online;
-    return card("book", t("paperread"), s.paperread_url, el("div", null,
-      el("div.status-line", null, el("span.dot." + (online ? "done" : "todo")), prStatus ? (online ? t("pr_online") : t("pr_offline")) : "…",
-        el("span.sep", null, "·"), prStatus ? (prStatus.library_found ? t("pr_library", { n: prStatus.count }) : t("pr_nolib")) : ""),
-      el("code.path", null, s.paperread_library),
-      el("div.toolbar", null,
-        el("a.btn.outline.sm", { href: H.safeUrl(s.paperread_url) || "#", target: "_blank", rel: "noopener" }, H.icon("external", 14), el("span", null, t("pr_open"))),
-        H.btn(t("pr_sync"), { icon: "refresh", small: true, variant: "primary", onclick: async () => {
-          try {
-            const out = await H.api("/api/paperread/sync", { body: {} });
-            const extra = out.skipped && out.skipped.length ? " · " + t("pr_skipped", { n: out.skipped.length }) : "";
-            H.toast((out.proposal ? t("pr_synced") : t("pr_uptodate")) + extra, "ok", out.proposal ? { label: t("inbox"), fn: H.openInbox } : null); loadPr();
-          }
-          catch (e) { H.toast(e.message, "error"); }
-        } }))), H.btn(t("scan"), { icon: "refresh", iconOnly: true, small: true, variant: "ghost", onclick: loadPr }));
   }
 
   let agentCfg = null;
@@ -204,7 +182,7 @@
   }
 
   function linksCard() {
-    const list = H.state.resources.filter((r) => ["link", "folder", "code", "paperread"].includes(r.kind));
+    const list = H.state.resources.filter((r) => ["link", "folder", "code"].includes(r.kind));
     return card("link", t("other_links"), null, list.length ? el("ul.res-list", null, list.map(H.resourceRow)) : el("p.empty.sm", null, t("none")),
       H.btn(t("add"), { icon: "plus", small: true, variant: "ghost", onclick: () => H.editResource(null) }));
   }
@@ -214,7 +192,7 @@
     const root = document.getElementById("hub");
     H.put(root, 
       el("div.band-head", null, el("div", null, el("div.eyebrow", null, "03", el("span", null, "/"), t("hub")), el("h2", null, t("hub")), el("p.sub", null, t("hub_hint")))),
-      el("div.hub-grid", null, databasesCard(), usageCard(), paperreadCard(), foldersCard(), mcpCard(),
+      el("div.hub-grid", null, databasesCard(), usageCard(), foldersCard(), mcpCard(),
         card("code", t("code"), null, H.codeCard()), filesCard(), linksCard()));
   };
   H.refreshScripts = loadScripts;
@@ -348,7 +326,7 @@
     const approve = H.btn(p.ops.length > 1 ? t("approve_sel") : t("approve"), { icon: "check", variant: "primary", small: true, onclick: () => act(true, btns) });
     btns.push(reject, approve);
     return el("li.proposal." + p.status, null,
-      el("div.p-head", null, el("span.p-src", null, H.icon(p.source.includes("PaperRead") ? "book" : p.source.includes("folder") ? "folder" : "bot", 14), p.source),
+      el("div.p-head", null, el("span.p-src", null, H.icon(p.source.includes("literature") ? "book" : p.source.includes("folder") ? "folder" : "bot", 14), p.source),
         el("time.mono.muted", { datetime: p.created }, H.when(p.created)), !pending ? el("span.pill." + p.status, null, t(p.status)) : null),
       el("h3.p-title", null, p.title),
       p.summary ? el("p.p-summary", null, p.summary) : null,
@@ -400,7 +378,6 @@
     const s = H.state.settings;
     const f = {
       project_title: H.input(s.project_title), language: H.select(H.lang, [["zh", "繁體中文"], ["en", "English"]]),
-      paperread_url: H.input(s.paperread_url), paperread_library: H.input(s.paperread_library),
       reference_folders: H.textarea((s.reference_folders || []).join("\n"), { rows: 3, placeholder: "/Users/me/Zotero/storage\nD:\\Papers" }),
       watch_folders: el("input", { type: "checkbox", checked: !!s.watch_folders }),
       code_dir: H.input(s.code_dir, { placeholder: "/Users/me/thesis-analysis" }),
@@ -452,7 +429,7 @@
         el("div.span2", null, H.field("API key", secrets.ai_api_key, t("ai_key_hint"))), el("div.span2", null, clearKey("ai_api_key")),
         H.field(t("ai_quota"), f.quota_ai), H.field(t("ai_token_quota"), f.quota_ai_tokens)),
       el("h3.mini", null, t("s_integrations")),
-      el("div.form-grid", null, H.field(t("s_pr_url"), f.paperread_url), H.field(t("s_pr_lib"), f.paperread_library),
+      el("div.form-grid", null,
         el("div.span2", null, H.field(t("s_ref_folders"), f.reference_folders)), el("div.span2", null, toggle(f.watch_folders, t("s_watch"))),
         H.field(t("s_code_dir"), f.code_dir), H.field(t("s_timeout"), f.code_timeout),
         el("div.span2", null, toggle(f.allow_code_run, t("s_allow_run"))),
@@ -471,7 +448,7 @@
         const langChanged = patch.language !== H.lang;
         H.closeLayer();
         if (langChanged) { location.href = "/" + patch.language + "/"; return; }
-        scripts = null; prStatus = null; scan = null; usage = null;
+        scripts = null; scan = null; usage = null;
         await H.refresh();
         H.toast(t("saved"), "ok");
       } catch (e) { H.toast(e.message, "error"); }

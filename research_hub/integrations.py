@@ -1,5 +1,6 @@
 """Connections to things outside the hub: local reference folders, BibTeX/RIS files,
-OpenAlex search, a PaperRead library, and Python analysis scripts.
+literature search (OpenAlex, Wiley via Crossref, Semantic Scholar, Web of Science),
+the optional AI assistant, and Python analysis scripts.
 
 Nothing here writes to the hub directly. Functions either return data for the
 user to act on, or build ``ops`` lists that the server turns into proposals the
@@ -42,13 +43,10 @@ def inside(path: Path, roots: list[Path]) -> bool:
 
 
 def allowed_roots(settings: dict) -> list[Path]:
-    """Folders whose files the hub may read and serve: reference folders, the
-    code folder and the PaperRead library."""
+    """Folders whose files the hub may read and serve: reference folders and the code folder."""
     roots = [expand(p) for p in settings.get("reference_folders") or []]
     if settings.get("code_dir"):
         roots.append(expand(settings["code_dir"]))
-    if settings.get("paperread_library"):
-        roots.append(expand(settings["paperread_library"]))
     return [r for r in roots if str(r) not in ("", ".", "/")]
 
 
@@ -293,152 +291,6 @@ def openalex_search(query: str, *, year_from: int = 0, limit: int = 20, mailto: 
             "openalex_id": (w.get("id") or "").rsplit("/", 1)[-1], "cited_by": w.get("cited_by_count", 0),
         })
     return out
-
-
-# ---------------------------------------------------------------- PaperRead
-_ROLE = {"iv": "iv", "dv": "dv", "med": "med", "mod": "mod", "ctrl": "ctrl"}
-_STATUS = {"unread": "to_read", "reading": "reading", "organizing": "reading", "done": "done", "paused": "to_read"}
-
-
-def _read_json(path: Path) -> dict:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-
-
-def _text(value, limit: int) -> str:
-    """Strings as-is; lists joined with ' ; '; anything else ignored."""
-    if isinstance(value, str):
-        return value.strip()[:limit]
-    if isinstance(value, (list, tuple)):
-        return " ; ".join(str(x).strip() for x in value if isinstance(x, (str, int, float)) and str(x).strip())[:limit]
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return str(value)[:limit]
-    return ""
-
-
-def paperread_items(library: str, skipped: list | None = None) -> list[dict]:
-    """Read a PaperRead library folder (read-only). Each paper lives in its own
-    folder with paper.json (metadata, extracted variables) and item.json (status).
-    Folders whose paper.json is unreadable or malformed are skipped (and listed in
-    ``skipped`` when given), never guessed at."""
-    root = expand(library)
-    if not root.is_dir():
-        return []
-    out = []
-    for folder in sorted(root.iterdir()):
-        if not folder.is_dir() or folder.name.startswith(".") or not (folder / "paper.json").exists():
-            continue
-        paper = _read_json(folder / "paper.json")
-        meta = paper.get("meta") if isinstance(paper, dict) else None
-        if not isinstance(meta, dict):
-            if skipped is not None:
-                skipped.append(folder.name)
-            continue
-        item = _read_json(folder / "item.json")
-        item = item if isinstance(item, dict) else {}
-        meta = dict(meta)
-        override = item.get("meta_override")
-        if isinstance(override, dict):
-            meta.update({k: v for k, v in override.items() if v})
-        year = meta.get("year") or 0
-        if not year or not str(year).isdigit():
-            m = re.search(r"(19|20)\d{2}", str(meta.get("date", "")))
-            year = int(m.group(0)) if m else 0
-        raw_vars = paper.get("variables")
-        raw_vars = raw_vars.get("items") if isinstance(raw_vars, dict) else raw_vars
-        variables = []
-        for v in raw_vars if isinstance(raw_vars, list) else []:
-            if not isinstance(v, dict):
-                continue
-            role = _ROLE.get(str(v.get("role", "")).lower())
-            en, zh = _text(v.get("en"), 120), _text(v.get("zh"), 80)
-            if role and (en or zh):
-                variables.append({"role": role, "en": en, "zh": zh, "abbr": _text(v.get("abbr"), 20)})
-        tags = item.get("tags")
-        tags = [t.strip() for t in tags.split(",")] if isinstance(tags, str) else tags if isinstance(tags, list) else []
-        status = item.get("status") if isinstance(item.get("status"), str) else "unread"
-        out.append({
-            "paperread_id": folder.name,
-            "title": _text(meta.get("title_en"), 500) or _text(meta.get("title_zh"), 500) or folder.name,
-            "title_zh": _text(meta.get("title_zh"), 500), "authors": _text(meta.get("authors"), 500),
-            "year": int(year) if str(year).isdigit() else 0, "venue": _text(meta.get("venue"), 300), "doi": _text(meta.get("doi"), 200),
-            "status": _STATUS.get(status, "to_read"),
-            "tags": ", ".join(str(t).strip() for t in tags if isinstance(t, (str, int)) and str(t).strip())[:500],
-            "variables": variables,
-        })
-    return out
-
-
-def paperread_sync_ops(items: list[dict], papers: list[dict], variables: list[dict],
-                       links: list[dict] | None = None) -> tuple[list[dict], dict]:
-    """Ops that bring PaperRead's library into the hub: new papers, reading-status
-    changes, and variables PaperRead extracted, linked to their paper."""
-    linked = {(l["variable_id"], l["paper_id"]) for l in links or []}
-    by_pr = {p["paperread_id"]: p for p in papers if p.get("paperread_id")}
-    by_doi = {p["doi"].lower(): p for p in papers if p.get("doi")}
-    known_vars = {(v["name_en"] or "").casefold(): v for v in variables if v.get("name_en")}
-    known_vars.update({(v["name_zh"] or "").casefold(): v for v in variables if v.get("name_zh")})
-    used_symbols = {v["symbol"] for v in variables}
-    counters = {"iv": "X", "dv": "Y", "med": "M", "mod": "Z", "ctrl": "C"}
-    ops: list[dict] = []
-    stats = {"new": 0, "status": 0, "variables": 0}
-    new_vars: dict[str, str] = {}
-
-    def next_symbol(role: str) -> str:
-        prefix = counters.get(role, "V")
-        n = 1
-        while f"{prefix}{n}" in used_symbols:
-            n += 1
-        used_symbols.add(f"{prefix}{n}")
-        return f"{prefix}{n}"
-
-    for i, it in enumerate(items):
-        existing = by_pr.get(it["paperread_id"]) or (by_doi.get(it["doi"].lower()) if it.get("doi") else None)
-        if existing:
-            paper_ref = existing["id"]
-            patch = {}
-            if not existing.get("paperread_id"):
-                patch["paperread_id"] = it["paperread_id"]
-            if existing.get("status") != it["status"] and existing.get("status") != "excluded":
-                patch["status"] = it["status"]
-                stats["status"] += 1
-            if patch:
-                ops.append({"op": "update", "entity": "paper", "id": existing["id"], "data": patch})
-        else:
-            ref = f"pr{i}"
-            data = {k: it[k] for k in ("title", "authors", "year", "venue", "doi", "status", "tags", "paperread_id")}
-            data["source"] = "paperread"
-            ops.append({"op": "create", "entity": "paper", "ref": ref, "data": data})
-            paper_ref = f"${ref}"
-            stats["new"] += 1
-        for j, v in enumerate(it["variables"]):
-            key = (v["en"] or v["zh"]).casefold()
-            if key in known_vars:
-                var_ref = known_vars[key]["id"]
-            elif key in new_vars:
-                var_ref = new_vars[key]
-            else:
-                ref = f"prv{i}_{j}"
-                ops.append({"op": "create", "entity": "variable", "ref": ref, "data": {
-                    "symbol": next_symbol(v["role"]), "role": v["role"], "name_en": v["en"], "name_zh": v["zh"],
-                    "notes": f"From PaperRead ({v['abbr']})" if v["abbr"] else "From PaperRead"}})
-                var_ref = new_vars[key] = f"${ref}"
-                stats["variables"] += 1
-            if isinstance(var_ref, int) and isinstance(paper_ref, int) and (var_ref, paper_ref) in linked:
-                continue  # already linked: keep the user's evidence and note
-            # "keep": never overwrite an existing link if one appears before approval
-            ops.append({"op": "link", "link": "variable_paper", "a": var_ref, "b": paper_ref, "data": {"evidence": "mentions"}, "keep": True})
-    return ops, stats
-
-
-def paperread_online(url: str) -> bool:
-    try:
-        with urllib.request.urlopen(url.rstrip("/") + "/api/version", timeout=1.5) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
 
 
 # ---------------------------------------------------------------- Python code

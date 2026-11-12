@@ -300,7 +300,6 @@
     const vlinks = H.links("variable_paper", "b", p.id);
     const status = H.select(p.status, H.PAPER_STATUS.map((s) => [s, t("ps_" + s)]), { class: "sm status-sel ps-" + p.status, "aria-label": t("status"), dataset: { fkey: `paper-st-${p.id}-${scope}` },
       onchange: (e) => H.ops([{ op: "update", entity: "paper", id: p.id, data: { status: e.target.value } }]) });
-    const prUrl = (H.safeUrl(H.state.settings.paperread_url) || "").replace(/\/$/, "");
     return el("li.paper" + (p.status === "excluded" ? ".excluded" : ""), null,
       el("div.paper-main", null,
         el("button.paper-title", { type: "button", onclick: () => H.editPaper(p) }, p.title),
@@ -312,7 +311,6 @@
       el("div.paper-side", null, status,
         el("div.icon-row", null,
           p.local_path ? H.btn(t("open_pdf"), { icon: "file", iconOnly: true, small: true, variant: "ghost", onclick: () => H.openLocal(p.local_path) }) : null,
-          p.paperread_id && prUrl ? el("a.btn.ghost.icon-only.sm", { href: `${prUrl}/read/${encodeURIComponent(p.paperread_id)}`, target: "_blank", rel: "noopener", title: t("open_in_pr"), "aria-label": t("open_in_pr") }, H.icon("book", 16)) : null,
           (() => { const href = p.doi ? `https://doi.org/${encodeURI(p.doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, ""))}` : H.safeUrl(p.url);
             return href ? el("a.btn.ghost.icon-only.sm", { href, target: "_blank", rel: "noopener noreferrer", title: p.doi || p.url, "aria-label": p.doi ? "DOI" : "URL" }, H.icon("external", 16)) : null; })(),
           H.btn(t("edit"), { icon: "edit", iconOnly: true, small: true, variant: "ghost", onclick: () => H.editPaper(p) }))));

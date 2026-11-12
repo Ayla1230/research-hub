@@ -25,7 +25,8 @@ PROVIDERS = ("openalex", "wiley", "semantic", "wos")
 RQ_STATUS = ("draft", "refined", "answered")
 VAR_ROLES = ("iv", "dv", "med", "mod", "ctrl", "other")
 PAPER_STATUS = ("candidate", "to_read", "reading", "done", "excluded")
-RESOURCE_KINDS = ("database", "folder", "mcp", "code", "link", "paperread")
+RESOURCE_KINDS = ("database", "folder", "mcp", "code", "link")
+REMOVED_SETTINGS = ("paperread_url", "paperread_library")
 MODULES = ("", "literature", "rq", "variables", "code", "writing")
 EVIDENCE = ("", "supports", "contradicts", "mixed", "defines", "measures", "mentions")
 
@@ -75,7 +76,7 @@ ENTITIES: dict[str, dict] = {
             "venue": ("str", None), "doi": ("str", None), "url": ("str", None),
             "abstract": ("text", None), "local_path": ("str", None), "citekey": ("str", None),
             "source": ("str", None), "status": ("enum", PAPER_STATUS), "rating": ("int", (0, 5)),
-            "tags": ("str", None), "notes": ("text", None), "paperread_id": ("str", None),
+            "tags": ("str", None), "notes": ("text", None),
             "openalex_id": ("str", None),
         },
         "required": ("title",),
@@ -151,7 +152,7 @@ CREATE TABLE IF NOT EXISTS papers (
   url TEXT NOT NULL DEFAULT '', abstract TEXT NOT NULL DEFAULT '', local_path TEXT NOT NULL DEFAULT '',
   citekey TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'manual', status TEXT NOT NULL DEFAULT 'to_read',
   rating INTEGER NOT NULL DEFAULT 0, tags TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
-  paperread_id TEXT NOT NULL DEFAULT '', openalex_id TEXT NOT NULL DEFAULT '',
+  openalex_id TEXT NOT NULL DEFAULT '',
   created TEXT NOT NULL, updated TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS resources (
@@ -275,6 +276,10 @@ class Store:
             cols = {r["name"] for r in db.execute("PRAGMA table_info(stages)")}
             if "goal" not in cols:  # workspaces created by v1.0.0
                 db.execute("ALTER TABLE stages ADD COLUMN goal TEXT NOT NULL DEFAULT ''")
+            # v1.1 dropped the PaperRead integration: keep the data, drop what pointed at it.
+            db.execute(f"DELETE FROM settings WHERE k IN ({', '.join('?' * len(REMOVED_SETTINGS))})", REMOVED_SETTINGS)
+            db.execute("DELETE FROM resources WHERE kind='paperread' AND name='PaperRead' AND target='http://127.0.0.1:8765'")
+            db.execute("UPDATE resources SET kind='link' WHERE kind='paperread'")  # links the user added stay, as plain links
             if not db.execute("SELECT 1 FROM meta WHERE k='schema'").fetchone():
                 self._seed(db, "en" if lang == "en" else "zh")
 
@@ -364,8 +369,6 @@ class Store:
                 raise ValidationError("language must be zh or en")
             if k == "code_timeout":
                 v = max(10, min(86400, v))
-            if k == "paperread_url" and v and not re.match(r"^https?://[^\s/]+", v, re.I):
-                raise ValidationError("PaperRead URL must start with http:// or https://")
             if k == "openalex_mailto" and v and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", v):
                 raise ValidationError("OpenAlex contact must be an email address")
             if k == "project_deadline" and v:
@@ -589,9 +592,6 @@ class Store:
                 clean["role"] = "iv"
             if entity == "stage" and not clean.get("title_en"):
                 clean["title_en"] = clean["title_zh"]
-            if entity == "paper" and clean.get("paperread_id") and db.execute(
-                    "SELECT 1 FROM papers WHERE paperread_id=?", (clean["paperread_id"],)).fetchone():
-                raise ValidationError(f"PaperRead paper {clean['paperread_id']} is already in the library")
             cols = list(clean) + ["created", "updated"]
             db.execute(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                        [*clean.values(), stamp, stamp])

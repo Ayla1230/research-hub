@@ -77,7 +77,7 @@
   function foot() {
     document.getElementById("foot").replaceChildren(el("div.foot-in", null,
       el("span.mono", null, "Research Hub v" + document.querySelector('meta[name="hub-version"]').content),
-      el("span", null, "PaperRead · OpenAlex · MCP"),
+      el("span", null, "OpenAlex · Wiley · Semantic Scholar · MCP"),
       el("a", { href: "/static/diagrams/index.html", target: "_blank", rel: "noopener" }, H.lang === "en" ? "System map" : "系統架構圖")));
   }
 

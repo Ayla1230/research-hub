@@ -1,6 +1,6 @@
 # Research Hub · 研究進度中樞
 
-<p align="center"><b>以 PaperRead 為核心的本機論文進度管理系統。</b><br>
+<p align="center"><b>本機執行的論文進度管理系統。</b><br>
 從研究主題到口試發表，一條節點流程管理整個研究；研究問題、變數、文獻、資料庫、本機資料夾、MCP 智能體與 Python 分析程式集中在同一個平台。</p>
 
 <p align="center"><b>繁體中文</b> · <a href="README.en.md">English</a></p>
@@ -30,9 +30,9 @@ start.cmd             # Windows
 | **研究核心** | 專門管理研究問題（RQ）、變數（自變數 X、依變數 Y、中介 M、調節 Z、控制 C）與文獻。每個變數都能連結相關論文並標示關係（支持、反駁、結果分歧、定義來源、量表來源、提及），未有文獻支持的變數會被標示提醒。 |
 | **變數 × 文獻矩陣** | 一眼看出每個變數有哪些文獻支持，點選格子即可切換關係。 |
 | **研究架構圖** | 依變數角色自動繪出 X → M → Y、Z 調節、C 控制的概念模型。 |
-| **文獻管理** | OpenAlex 檢索並加入、匯入／匯出 BibTeX 與 RIS（依 DOI、引用鍵、標題自動略過重複）、閱讀狀態（候選／待閱讀／閱讀中／已讀完／排除）、評分、標籤、開啟本機 PDF、在 PaperRead 開啟。 |
-| **整合中心** | 學術資料庫一鍵檢索（Google Scholar、Semantic Scholar、arXiv、PubMed、Scopus、Web of Science、華藝、臺灣博碩士論文系統，可自行新增，網址中以 `{q}` 代表關鍵字）；本機文獻資料夾掃描與匯入；PaperRead 文獻庫同步；MCP 工具設定；Python 程式資料夾與腳本執行；所有上傳檔案。 |
-| **即時更新＋使用者確認** | 智能體完成任務、資料夾出現新檔案、PaperRead 同步到新論文或新變數時，變更會先進入「待確認更新」收件匣；使用者逐項勾選、核准後才寫入，確保進度追蹤正確。儀表板透過 Server-Sent Events 即時刷新。 |
+| **文獻管理** | OpenAlex 檢索並加入、匯入／匯出 BibTeX 與 RIS（依 DOI、引用鍵、標題自動略過重複）、閱讀狀態（候選／待閱讀／閱讀中／已讀完／排除）、評分、標籤、開啟本機 PDF。 |
+| **整合中心** | 學術資料庫一鍵檢索（Google Scholar、Semantic Scholar、arXiv、PubMed、Scopus、Web of Science、華藝、臺灣博碩士論文系統，可自行新增，網址中以 `{q}` 代表關鍵字）；本機文獻資料夾掃描與匯入；MCP 工具設定；Python 程式資料夾與腳本執行；所有上傳檔案。 |
+| **即時更新＋使用者確認** | 智能體完成任務、資料夾出現新檔案、背景追蹤找到相關新文獻時，變更會先進入「待確認更新」收件匣；使用者逐項勾選、核准後才寫入，確保進度追蹤正確。儀表板透過 Server-Sent Events 即時刷新。 |
 | **動態紀錄與備份** | 每次變更記錄來源（使用者／智能體／資料夾監看）與時間；可匯出完整 JSON 備份與 BibTeX。 |
 
 ## 上傳與進度回報（v1.1）
@@ -88,13 +88,6 @@ curl -X POST http://127.0.0.1:8770/api/agent/proposals -H "Authorization: Bearer
 
 提案格式（`ops`）：`create`／`update`（可加 `"append": {"notes": "…"}`）／`delete`（`entity` 為 `stage`、`task`、`rq`、`variable`、`paper`、`resource`），以及 `link`／`unlink`（`rq_variable`、`rq_paper`、`variable_paper`）。同一批次中可用 `"ref": "p1"` 建立物件，再以 `"$p1"` 引用。
 
-## 與 PaperRead 的整合
-
-- **連結**：設定 PaperRead 網址（預設 `http://127.0.0.1:8765`），從 PaperRead 匯入的文獻會出現「在 PaperRead 開啟」按鈕。
-- **同步**：設定 PaperRead 文獻庫資料夾（預設 `~/PaperRead/library`），按「同步文獻庫」會唯讀讀取每篇的 `paper.json`／`item.json`，把新論文、閱讀狀態變化，以及 PaperRead「研究變數標示」功能抽出的變數（自變數、依變數、中介、調節、控制）整理成一筆待確認更新，並自動建立變數與論文的關聯。
-- 重複同步不會產生重複資料：新的同步會取代尚未確認的舊同步提案，已存在的論文與你設定過的變數關係不會被覆蓋；無法讀取的資料夾會被略過並列出。
-- 本系統不會寫入 PaperRead 的任何檔案。
-
 ## Python 程式
 
 在設定中指定後續開發的 Python 專案資料夾，整合中心會列出其中的 `.py`／`.ipynb`。若勾選「允許從儀表板執行 .py 腳本」，可直接執行並查看輸出（使用目前的 Python、工作目錄為程式資料夾、有逾時限制；預設關閉）。
@@ -104,7 +97,7 @@ curl -X POST http://127.0.0.1:8770/api/agent/proposals -H "Authorization: Bearer
 - 只監聽 `127.0.0.1`，並檢查 Host 標頭（防 DNS rebinding）；系統沒有登入機制，請勿直接暴露到網際網路。
 - 儀表板的每個請求都需頁面載入時取得的 token，其他網站無法跨站寫入。
 - 智能體使用獨立、可重設的 agent token，只能讀取與提出變更。
-- 只會讀取／開啟設定中的資料夾（文獻資料夾、程式資料夾、PaperRead 文獻庫）與上傳目錄內的檔案。
+- 只會讀取／開啟設定中的資料夾（文獻資料夾、程式資料夾）與上傳目錄內的檔案。
 - 工作區內容：`hub.sqlite3`（所有結構化資料）與 `uploads/`（上傳檔案，依階段分資料夾）。
 
 ## 系統架構圖
@@ -126,7 +119,7 @@ curl -X POST http://127.0.0.1:8770/api/agent/proposals -H "Authorization: Bearer
 research_hub/
   store.py          SQLite 資料層、驗證、提案（確認閘門）、動態紀錄
   server.py         HTTP API、SSE、上傳、資料夾監看、安全檢查
-  integrations.py   BibTeX/RIS、資料夾掃描、OpenAlex、PaperRead、Python 執行
+  integrations.py   BibTeX/RIS、資料夾掃描、文獻檢索、AI 助理、Python 執行
   mcp_server.py     MCP 伺服器（stdio）
   defaults.py       預設研究流程、資料庫與設定
   demo.py           範例資料

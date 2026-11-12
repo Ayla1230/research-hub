@@ -1,6 +1,6 @@
 """Local HTTP server: dashboard, JSON API, Server-Sent Events, agent inbox.
 
-Security model (same spirit as PaperRead):
+Security model:
 * listens on 127.0.0.1 by default and rejects unknown Host headers (DNS rebinding);
 * every state-changing request from the dashboard carries the per-process token
   that is embedded in the page, so other web pages cannot write;
@@ -392,12 +392,6 @@ def make_handler(app: App):
                 except Exception as e:
                     return self._error(502, f"OpenAlex unavailable: {e}")
                 return self._json(200, {"results": results})
-            if path == "/api/paperread/status":
-                settings = store.settings()
-                items = integ.paperread_items(settings.get("paperread_library", ""))
-                return self._json(200, {"online": integ.paperread_online(settings.get("paperread_url", "")),
-                                        "library_found": integ.expand(settings.get("paperread_library", "")).is_dir(),
-                                        "count": len(items)})
             if path == "/api/local":
                 target = integ.expand(q1("path"))
                 if not target.is_file() or not integ.inside(target, integ.allowed_roots(store.settings())):
@@ -549,31 +543,6 @@ def make_handler(app: App):
             if path == "/api/watch/scan":
                 result = app.watch_once()
                 return self._json(200, {"proposal": result})
-            if path == "/api/paperread/sync":
-                settings = store.settings()
-                skipped: list[str] = []
-                items = integ.paperread_items(settings.get("paperread_library", ""), skipped)
-                if not items:
-                    raise ValidationError("PaperRead library not found or empty — check the library path in Settings")
-                # A newer sync replaces older pending sync proposals, so approving both can never duplicate.
-                for old_p in store.list_proposals("pending"):
-                    if old_p["source"] == "PaperRead sync":
-                        store.decide(old_p["id"], False)
-                snap = store.snapshot()
-                ops, stats = integ.paperread_sync_ops(items, snap["papers"], snap["variables"], snap["variable_papers"])
-                stats["skipped"] = len(skipped)
-                if not ops:
-                    return self._json(200, {"proposal": None, "stats": stats, "skipped": skipped})
-                if settings.get("language") == "en":
-                    title = f"PaperRead: {stats['new']} new, {stats['status']} status, {stats['variables']} variables"
-                    summary = "Papers, reading status and variables found in the PaperRead library." + (
-                        f" Skipped unreadable folders: {', '.join(skipped[:10])}." if skipped else "")
-                else:
-                    title = f"PaperRead：新文獻 {stats['new']} 篇、狀態更新 {stats['status']} 筆、變數 {stats['variables']} 個"
-                    summary = "從 PaperRead 文獻庫找到的論文、閱讀狀態與研究變數。" + (
-                        f"已略過無法讀取的資料夾：{'、'.join(skipped[:10])}。" if skipped else "")
-                proposal = store.propose("PaperRead sync", title, ops, summary)
-                return self._json(200, {"proposal": proposal, "stats": stats, "skipped": skipped})
             if path == "/api/scripts/run":
                 settings = store.settings()
                 if not settings.get("allow_code_run"):

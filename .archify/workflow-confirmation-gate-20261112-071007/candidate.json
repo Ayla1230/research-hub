@@ -1,0 +1,210 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "智能體更新的確認閘門",
+    "locale": "zh-TW",
+    "quality_profile": "showcase",
+    "output": "research_hub/web/diagrams/confirmation-gate.html"
+  },
+  "lanes": [
+    {
+      "id": "sources",
+      "label": "智能體與資料來源"
+    },
+    {
+      "id": "gate",
+      "label": "確認閘門",
+      "variant": "exception"
+    },
+    {
+      "id": "user",
+      "label": "研究者"
+    },
+    {
+      "id": "hub",
+      "label": "Research Hub"
+    }
+  ],
+  "phases": [
+    {
+      "id": "produce",
+      "label": "產生新資訊",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "confirm",
+      "label": "使用者確認",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "update",
+      "label": "更新進度",
+      "fromCol": 4,
+      "toCol": 5
+    }
+  ],
+  "mainPath": [
+    "agent",
+    "mcp",
+    "inbox",
+    "review",
+    "apply",
+    "store",
+    "dash"
+  ],
+  "nodes": [
+    {
+      "id": "agent",
+      "lane": "sources",
+      "col": 0,
+      "type": "external",
+      "label": "AI 智能體",
+      "sublabel": "完成檢索或分析"
+    },
+    {
+      "id": "mcp",
+      "lane": "sources",
+      "col": 1,
+      "type": "messagebus",
+      "label": "MCP 伺服器",
+      "sublabel": "propose_changes"
+    },
+    {
+      "id": "watch",
+      "lane": "sources",
+      "col": 2,
+      "type": "backend",
+      "label": "背景追蹤",
+      "sublabel": "新檔案 · 新文獻"
+    },
+    {
+      "id": "inbox",
+      "lane": "gate",
+      "col": 2,
+      "type": "security",
+      "label": "待確認收件匣",
+      "sublabel": "dry-run 驗證",
+      "tag": "尚未寫入"
+    },
+    {
+      "id": "rejected",
+      "lane": "gate",
+      "col": 4,
+      "type": "security",
+      "label": "已略過",
+      "sublabel": "資料不變"
+    },
+    {
+      "id": "review",
+      "lane": "user",
+      "col": 3,
+      "type": "frontend",
+      "label": "審閱變更",
+      "sublabel": "可逐項勾選"
+    },
+    {
+      "id": "apply",
+      "lane": "hub",
+      "col": 4,
+      "type": "backend",
+      "label": "套用變更",
+      "sublabel": "單一交易"
+    },
+    {
+      "id": "store",
+      "lane": "hub",
+      "col": 5,
+      "type": "database",
+      "label": "hub.sqlite3",
+      "sublabel": "動態紀錄"
+    },
+    {
+      "id": "dash",
+      "lane": "user",
+      "col": 5,
+      "type": "frontend",
+      "label": "儀表板",
+      "sublabel": "即時更新"
+    }
+  ],
+  "edges": [
+    {
+      "id": "agent-mcp",
+      "from": "agent",
+      "to": "mcp",
+      "label": "工具呼叫"
+    },
+    {
+      "id": "mcp-inbox",
+      "from": "mcp",
+      "to": "inbox",
+      "label": "提案",
+      "variant": "emphasis"
+    },
+    {
+      "id": "watch-inbox",
+      "from": "watch",
+      "to": "inbox",
+      "label": "新資訊",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "inbox-review",
+      "from": "inbox",
+      "to": "review",
+      "label": "通知",
+      "variant": "emphasis"
+    },
+    {
+      "id": "review-apply",
+      "from": "review",
+      "to": "apply",
+      "label": "核准",
+      "variant": "emphasis"
+    },
+    {
+      "id": "review-reject",
+      "from": "review",
+      "to": "rejected",
+      "label": "略過",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "apply-store",
+      "from": "apply",
+      "to": "store",
+      "label": "寫入"
+    },
+    {
+      "id": "store-dash",
+      "from": "store",
+      "to": "dash",
+      "label": "SSE",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "確認規則",
+      "items": [
+        "智能體只能提出變更，無法直接寫入",
+        "每個提案先以 dry-run 驗證後才進收件匣"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "套用後",
+      "items": [
+        "勾選的變更在單一交易內套用",
+        "動態紀錄保留來源與時間，儀表板即時刷新"
+      ]
+    }
+  ]
+}

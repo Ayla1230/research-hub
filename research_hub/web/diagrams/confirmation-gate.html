@@ -5285,7 +5285,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <path data-edge-from="review" data-edge-to="apply" data-edge-label="核准" data-edge-key="4" data-edge-id="review-apply" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="486.4,398;486.4,498;560.4,498" d="M 486.4 398 L 486.4 490 Q 486.4 498 494.4 498 L 560.4 498" class="a-emphasis" data-animate="edge" style="--step:3" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="review" data-edge-to="rejected" data-edge-label="略過" data-edge-key="5" data-edge-id="review-reject" data-composition-routing="workflow-v2-auto" data-edge-role="error" data-composition-points="510.4,346;510.4,246;560.4,246" d="M 510.4 346 L 510.4 254 Q 510.4 246 518.4 246 L 560.4 246" class="a-security" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="store" data-edge-to="dash" data-edge-label="SSE" data-edge-key="6" data-edge-id="store-dash" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="736.4,472;736.4,398" d="M 736.4 472 L 736.4 398" class="a-emphasis" data-animate="edge" style="--step:5" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="watch" data-edge-to="inbox" data-edge-label="新檔案" data-edge-key="7" data-edge-id="watch-inbox" data-composition-routing="workflow-v2-auto" data-edge-role="branch" data-composition-points="366.4,146;366.4,212" d="M 366.4 146 L 366.4 212" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="watch" data-edge-to="inbox" data-edge-label="新資訊" data-edge-key="7" data-edge-id="watch-inbox" data-composition-routing="workflow-v2-auto" data-edge-role="branch" data-composition-points="366.4,146;366.4,212" d="M 366.4 146 L 366.4 212" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
 
         <!-- Nodes -->
         <g id="node-agent" data-node-id="agent" data-node-label="AI 智能體" tabindex="0" role="button" aria-label="聚焦AI 智能體，完成檢索或分析, 智能體與資料來源 › 產生新資訊" aria-pressed="false" data-node-kind="external" data-node-sublabel="完成檢索或分析" data-node-context="智能體與資料來源 › 產生新資訊">
@@ -5314,15 +5314,15 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="242.4" y="132" class="t-muted" font-size="8" text-anchor="middle">propose_changes</text>
         </g>
 
-        <g id="node-watch" data-node-id="watch" data-node-label="資料夾監看" tabindex="0" role="button" aria-label="聚焦資料夾監看，PaperRead 同步, 智能體與資料來源 › 使用者確認" aria-pressed="false" data-node-kind="backend" data-node-sublabel="PaperRead 同步" data-node-context="智能體與資料來源 › 使用者確認">
-          <title>資料夾監看 · PaperRead 同步 · 智能體與資料來源 › 使用者確認</title>
+        <g id="node-watch" data-node-id="watch" data-node-label="背景追蹤" tabindex="0" role="button" aria-label="聚焦背景追蹤，新檔案 · 新文獻, 智能體與資料來源 › 使用者確認" aria-pressed="false" data-node-kind="backend" data-node-sublabel="新檔案 · 新文獻" data-node-context="智能體與資料來源 › 使用者確認">
+          <title>背景追蹤 · 新檔案 · 新文獻 · 智能體與資料來源 › 使用者確認</title>
           <rect x="320.4" y="94" width="92" height="52" rx="8" class="c-mask"/>
           <rect x="320.4" y="94" width="92" height="52" rx="8" class="c-backend" data-animate="node" style="--step:9" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(326.4 100) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="372.4" y="115" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">資料夾監看</text>
-          <text data-detail="context" x="366.4" y="132" class="t-muted" font-size="8" text-anchor="middle">PaperRead 同步</text>
+          <text data-node-label="" data-detail-anchor="" x="366.4" y="115" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">背景追蹤</text>
+          <text data-detail="context" x="366.4" y="132" class="t-muted" font-size="8" text-anchor="middle">新檔案 · 新文獻</text>
         </g>
 
         <g id="node-inbox" data-node-id="inbox" data-node-label="待確認收件匣" tabindex="0" role="button" aria-label="聚焦待確認收件匣，dry-run 驗證, 確認閘門 › 使用者確認" aria-pressed="false" data-node-kind="security" data-node-sublabel="dry-run 驗證" data-node-tag="尚未寫入" data-node-context="確認閘門 › 使用者確認">
@@ -5430,9 +5430,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <rect x="721.4" y="425" width="30" height="14" rx="3" class="c-mask"/>
           <text x="736.4" y="435" class="t-edge-emphasis" font-size="8" text-anchor="middle">SSE</text>
         </g>
-        <g data-detail="context" data-edge-from="watch" data-edge-to="inbox" data-edge-label="新檔案" data-edge-key="7" data-edge-id="watch-inbox">
+        <g data-detail="context" data-edge-from="watch" data-edge-to="inbox" data-edge-label="新資訊" data-edge-key="7" data-edge-id="watch-inbox">
           <rect x="347" y="169" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="366.4" y="179" class="t-edge-dashed" font-size="8" text-anchor="middle">新檔案</text>
+          <text x="366.4" y="179" class="t-edge-dashed" font-size="8" text-anchor="middle">新資訊</text>
         </g>
 
         <!-- Legend -->
