@@ -75,6 +75,18 @@ In **Research core → Research model**, choose **From my writing** and paste or
 - **The research model** is drawn from the hypothesis paths: labels and direction on each line, negative paths dashed red, moderators pointing at the path they moderate, and paths that skip a column routed above the boxes. Paths can also be added by hand.
 - **Download SVG** gives a clean vector figure (no paper counts or RQ markers) for the thesis or slides.
 
+## PowerPoint export
+
+**Make slides** on the dashboard (or in the Writing stage) opens the **slide design instructions** window:
+
+1. **Design instructions**: describe the deck in a sentence, e.g. "progress report for my advisor, 10 slides, navy, serif titles, Microsoft JhengHei body, no literature". **Apply instructions** sets colours, fonts, purpose, slide count, language, size and which slides to include or drop. Optionally let the AI write each slide's key message and speaker notes (counts toward today's quota); otherwise they are generated from your data.
+2. **Purpose**: advisor progress report, thesis defense or conference talk, each with default slides.
+3. **Slides**: cover, progress overview, research questions, research model, hypotheses, variables table, literature, recent progress, next steps, closing Q&A.
+4. **Look & fonts**: five colour themes; separate heading and body fonts — Noto Serif TC (open-source Ming/Song), PMingLiU (Windows Ming), Microsoft JhengHei, Noto Sans TC, DFKai-SB, PingFang TC. Fonts are set on every text run and in the deck theme, so new text typed in PowerPoint uses them too. Open-source fonts must be installed on the computer that shows the deck (links in the window).
+5. **Export PowerPoint**: a `.pptx` (16:9 or 4:3) whose research model is drawn with native, editable PowerPoint shapes; optionally filed under the Defense stage.
+
+The deck is built in the browser with the bundled PptxGenJS (MIT), offline; only the optional AI writing step calls your AI service.
+
 ## Agents and MCP
 
 Research Hub ships an MCP server (stdio, standard library). Get a ready-made command, including the agent token, from **Integration hub → MCP tools & agents → Show command**. For Claude Code:

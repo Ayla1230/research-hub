@@ -652,6 +652,56 @@ class ServerTests(unittest.TestCase):
         trust = next(v for v in out["variables"] if v["name_zh"] == "信任")
         self.assertTrue(trust.get("existing_id"))
 
+    def test_exports_one_shot_download(self):
+        name = "我的研究 · 論文口試.pptx"
+        code, body = self.req("/api/exports", raw=b"PK\x03\x04deck", headers={"X-Filename": urllib.request.quote(name)})
+        self.assertEqual(code, 200, body)
+        url = json.loads(body)["url"]
+        self.assertEqual(self.req(url, token=False)[0], 403)  # needs the page token in the query
+        r = urllib.request.Request(self.url + url + "?token=" + urllib.request.quote(self.app.token))
+        with urllib.request.urlopen(r, timeout=10) as resp:
+            self.assertEqual(resp.read(), b"PK\x03\x04deck")
+            disp = resp.headers["Content-Disposition"]
+            self.assertIn("filename*=UTF-8''" + urllib.request.quote(name), disp)
+            self.assertIn("presentationml", resp.headers["Content-Type"])
+        self.assertEqual(self.req(url + "?token=" + urllib.request.quote(self.app.token), token=False)[0], 404)  # one shot
+        self.assertFalse(any((Path(self.dir) / "uploads" / ".exports").iterdir()))
+
+    def test_slides_ai_with_fake_provider(self):
+        from http.server import BaseHTTPRequestHandler
+
+        class Fake(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                reply = {"choices": [{"message": {"content": json.dumps({
+                    "messages": {"overview": "進度穩定", "evil": "x"}, "notes": {"overview": "講稿內容", "model": 5}})}}],
+                    "usage": {"total_tokens": 50}}
+                data = json.dumps(reply).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        fake = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
+        threading.Thread(target=fake.serve_forever, daemon=True).start()
+        try:
+            self.assertEqual(self.req("/api/slides/ai", {"sections": ["overview"]})[0], 400)  # AI not configured
+            self.store.save_settings({"ai_provider": "custom", "ai_base_url": f"http://127.0.0.1:{fake.server_address[1]}/v1",
+                                      "ai_model": "m", "ai_api_key": "k", "quota_ai": 10})
+            self.assertEqual(self.req("/api/slides/ai", {"sections": ["bogus"]})[0], 400)
+            code, body = self.req("/api/slides/ai", {"sections": ["overview", "model"], "instructions": "口試", "lang": "zh"})
+            self.assertEqual(code, 200, body)
+            out = json.loads(body)
+            self.assertEqual(out["messages"], {"overview": "進度穩定"})  # unknown keys and non-text dropped
+            self.assertEqual(out["notes"], {"overview": "講稿內容"})
+        finally:
+            fake.shutdown()
+            fake.server_close()
+            self.store.save_settings({"ai_provider": "", "ai_api_key": ""})
+
     def test_script_run_disabled_by_default(self):
         code, body = self.req("/api/scripts/run", {"path": "/tmp/x.py"})
         self.assertEqual(code, 400)

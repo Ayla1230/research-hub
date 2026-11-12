@@ -49,6 +49,7 @@
         title,
         el("div.hero-cta", null,
           H.btn(t("ci_hero"), { icon: "upload", variant: "primary", onclick: () => H.openCheckin({}) }),
+          H.btn(t("sl_hero"), { icon: "layers", variant: "outline", onclick: () => H.openSlides() }),
           el("span.muted.sm", null, t("ci_hero_hint"))),
         el("div.hero-now", null,
           current ? el("button.now-chip", { type: "button", onclick: () => { H.ui.openStage = current.id; H.render.pipeline(); document.getElementById("stage-panel")?.scrollIntoView({ behavior: "smooth", block: "nearest" }); } },

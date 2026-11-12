@@ -236,6 +236,18 @@
   };
   /* Only http(s) links from user/agent data become hrefs (no javascript:, data:, file:). */
   H.safeUrl = (u) => (/^https?:\/\//i.test(String(u || "").trim()) ? String(u).trim() : null);
+  /* Save a file the page generated. Non-ASCII names go through the local server so every
+     browser receives the proper UTF-8 filename (some ignore it on in-page blob links). */
+  H.saveBlob = async function (blob, name) {
+    if (/^[\x20-\x7e]+$/.test(name)) {
+      const url = URL.createObjectURL(blob);
+      const a = el("a", { href: url, download: name }); document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      return;
+    }
+    const out = await H.api("/api/exports", { body: blob, headers: { "X-Filename": encodeURIComponent(name), "Content-Type": "application/octet-stream" } });
+    const a = el("a", { href: out.url + "?token=" + encodeURIComponent(H.token) }); document.body.append(a); a.click(); a.remove();
+  };
   H.size = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(0) + " KB" : (n / 1048576).toFixed(1) + " MB");
   H.stageTitle = (s) => (H.lang === "en" ? s.title_en || s.title_zh : s.title_zh || s.title_en);
   H.stageDesc = (s) => (H.lang === "en" ? s.desc_en || s.desc_zh : s.desc_zh || s.desc_en);

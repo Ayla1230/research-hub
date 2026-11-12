@@ -479,6 +479,7 @@
     if (module === "code") return H.codeCard ? H.codeCard() : null;
     if (module === "writing") return el("div.card", null, el("p", null, t("writing_hint")),
       el("div.toolbar", null, H.btn(t("export_bib"), { icon: "download", variant: "primary", onclick: exportBib }),
+        H.btn(t("sl_hero"), { icon: "layers", variant: "outline", onclick: () => H.openSlides() }),
         el("span.mono.muted", null, `${H.state.papers.filter((p) => p.status !== "excluded").length} ${t("papers")}`)));
     return null;
   };

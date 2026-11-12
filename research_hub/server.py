@@ -46,6 +46,8 @@ class App:
         self.clients: set[queue.Queue] = set()
         self.clients_lock = threading.Lock()
         self.runner = integ.Runner()
+        self.exports: dict[str, tuple[Path, str, float]] = {}  # one-shot downloads made in the browser
+        self.exports_lock = threading.Lock()
         self.stop = threading.Event()
         store.listeners.append(self.broadcast)
 
@@ -58,6 +60,28 @@ class App:
                     pass
 
     # -------------------------------------------------------------- folder watcher
+    def add_export(self, data: bytes, name: str) -> str:
+        """Keep a file the page generated (e.g. a .pptx) for one download, so the browser
+        receives it with a proper UTF-8 filename. Old entries expire after 10 minutes."""
+        folder = self.store.root / "uploads" / ".exports"
+        folder.mkdir(parents=True, exist_ok=True)
+        key = secrets.token_urlsafe(16)
+        path = folder / f"{key}.bin"
+        path.write_bytes(data)
+        with self.exports_lock:
+            now_t = time.time()
+            for k, (p, _, at) in list(self.exports.items()):
+                if now_t - at > 600:
+                    p.unlink(missing_ok=True)
+                    self.exports.pop(k, None)
+            self.exports[key] = (path, name, now_t)
+        return key
+
+    def take_export(self, key: str) -> tuple[Path, str] | None:
+        with self.exports_lock:
+            item = self.exports.pop(key, None)
+        return (item[0], item[1]) if item and time.time() - item[2] <= 600 else None
+
     def watch_once(self) -> dict | None:
         """Look for new files in reference folders; queue them as one proposal."""
         settings = self.store.settings()
@@ -198,10 +222,11 @@ def make_handler(app: App):
         def _file(self, path: Path, *, download: str | None = None, trusted: bool = False):
             try:
                 size = path.stat().st_size
-                ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+                ctype = mimetypes.guess_type(download or path.name)[0] or "application/octet-stream"
                 extra = {"Cache-Control": "no-cache"}
                 if download:
-                    extra["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(download)}"
+                    ascii_name = re.sub(r"[^A-Za-z0-9._ -]", "_", download).strip() or "download"
+                    extra["Content-Disposition"] = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(download)}"
                 elif not trusted and ctype not in ("application/pdf",) and not ctype.startswith(("image/", "text/plain")):
                     extra["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(path.name)}"
                 if not trusted and (ctype.startswith("text/html") or ctype == "image/svg+xml"):
@@ -328,6 +353,17 @@ def make_handler(app: App):
                 if not secrets.compare_digest(q1("token"), app.token):
                     return self._error(403, "missing or invalid page token")
                 return self._events()
+            m = re.fullmatch(r"/api/exports/([A-Za-z0-9_-]{10,40})", path)
+            if m:  # opened by navigation, so the token travels in the query
+                if not secrets.compare_digest(q1("token"), app.token):
+                    return self._error(403, "missing or invalid page token")
+                item = app.take_export(m.group(1))
+                if not item:
+                    return self._error(404, "this download has expired — export again")
+                try:
+                    return self._file(item[0], download=item[1])
+                finally:
+                    item[0].unlink(missing_ok=True)
             # Everything below can expose project data: require the page token.
             if not self._user_ok():
                 return self._error(403, "missing or invalid page token; reload the dashboard")
@@ -488,6 +524,14 @@ def make_handler(app: App):
                     "name": target.name, "stored": rel, "size": length, "stage_id": stage_id, "paper_id": paper_id,
                     "mime": mimetypes.guess_type(target.name)[0] or ""}}], actor="user", allow_internal=True)
                 return self._json(200, {"id": res[0]["id"], "name": target.name})
+            if path == "/api/exports":
+                name = unquote(self.headers.get("X-Filename", "")).strip()
+                name = re.sub(r"[\\/:*?\"<>|\x00-\x1f]", "_", Path(name).name)[:180] or "export.bin"
+                data = self._body(MAX_UPLOAD)
+                if not data:
+                    raise ValidationError("empty file")
+                key = app.add_export(data, name)
+                return self._json(200, {"url": f"/api/exports/{key}"})
             if path == "/api/import/bibtex":
                 text = self._body().decode("utf-8", errors="replace")
                 entries = integ.parse_bibtex(text) or integ.parse_ris(text)
@@ -540,6 +584,8 @@ def make_handler(app: App):
                                         "tokens": tokens})
             if path == "/api/framework/extract":
                 return self._json(200, self._framework(qs))
+            if path == "/api/slides/ai":
+                return self._json(200, self._slides_ai(self._payload()))
             if path == "/api/checkin":
                 return self._json(200, self._checkin(self._payload()))
             if path == "/api/watch/scan":
@@ -629,6 +675,44 @@ def make_handler(app: App):
                         break
             result["chars"] = len(text)
             return result
+
+        # ---------------------------------------------------------- slide text by the AI assistant
+        def _slides_ai(self, data: dict) -> dict:
+            """Key message and speaker notes per slide, following the user's design instructions.
+            Only text comes back; the deck itself is built in the browser."""
+            cfg = integ.ai_config(store.settings())
+            if not cfg:
+                raise ValidationError("AI assistant is not set up — choose a provider and key in Settings")
+            allowed = {"title", "overview", "rqs", "model", "hypotheses", "variables", "literature", "progress", "next", "closing"}
+            sections = [k for k in data.get("sections") or [] if k in allowed]
+            if not sections:
+                raise ValidationError("no slides selected")
+            lang = "English" if data.get("lang") == "en" else "Traditional Chinese (Taiwan)"
+            snap = store.snapshot()
+            var = {v["id"]: v for v in snap["variables"]}
+            name = lambda v: (v["name_en"] or v["name_zh"]) if data.get("lang") == "en" else (v["name_zh"] or v["name_en"])  # noqa: E731
+            facts = [f"Project: {snap['settings'].get('project_title', '')}", f"Overall progress: {snap['overall']}%",
+                     f"Thesis deadline: {snap['settings'].get('project_deadline') or '-'}",
+                     "Stages: " + "; ".join(f"{s_['title_en'] or s_['title_zh']} {s_['status']} {s_['progress']}%" for s_ in snap["stages"]),
+                     "Research questions: " + " | ".join(f"{r['code']}: {r['text']}" for r in snap["rqs"][:8]),
+                     "Variables: " + "; ".join(f"{v['symbol']} {name(v)} ({v['role']})" for v in snap["variables"][:20]),
+                     "Hypotheses: " + "; ".join(f"{r['label']} {name(var[r['source_id']])} -> {name(var[r['target_id']])} {r['kind']} {r['sign']}"
+                                                for r in snap.get("relations", [])[:20] if r["source_id"] in var and r["target_id"] in var),
+                     f"Papers: {len(snap['papers'])}", "Recent progress notes: " + " | ".join(u["note"][:200] for u in snap["updates"][:5])]
+            system = ("You prepare a graduate student's slides. Using ONLY the facts given, write for each requested slide key a short key "
+                      "message (one sentence, max 40 words) and speaker notes (3-6 sentences). Follow the design instructions for tone and emphasis. "
+                      f"Write in {lang}. Reply with ONE JSON object: {{\"messages\": {{key: text}}, \"notes\": {{key: text}}}}. Never invent results.")
+            user = (f"Purpose: {str(data.get('purpose') or '')[:40]}\nSlides: {', '.join(sections)}\n"
+                    f"Design instructions: {str(data.get('instructions') or '')[:2000]}\n\nFacts:\n" + "\n".join(facts))
+            store.take_quota("ai")
+            try:
+                reply, tokens = integ.ai_chat(cfg, system, user[:24000], timeout=120)
+            except Exception as e:
+                raise ValidationError(f"AI service unavailable: {e}") from None
+            store.add_tokens("ai", tokens)
+            out = integ.parse_json_block(reply)
+            clean = lambda d, limit: {k: str(v)[:limit] for k, v in (d or {}).items() if k in sections and isinstance(v, str) and v.strip()}  # noqa: E731
+            return {"messages": clean(out.get("messages"), 300), "notes": clean(out.get("notes"), 2000), "tokens": tokens}
 
         # ---------------------------------------------------------- check-in
         def _checkin(self, data: dict) -> dict:

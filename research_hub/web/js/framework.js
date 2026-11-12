@@ -10,12 +10,14 @@
   const relLabel = (r) => [r.label, r.sign ? `(${r.sign})` : ""].filter(Boolean).join(" ");
 
   /**
-   * Draw a research model from explicit hypothesis paths.
-   * vars: [{id, symbol, role, name_zh, name_en}], rels: [{id, source_id, target_id, kind, moderates_id, sign, label}]
-   * Columns follow the causal order (sources left, outcomes right); moderators sit above
-   * and point at the middle of the path they moderate; unconnected variables sit below.
+   * Lay out a research model from explicit hypothesis paths (shared by the SVG view and the
+   * PowerPoint export). vars: [{id, symbol, role, name_zh, name_en}],
+   * rels: [{id, source_id, target_id, kind, moderates_id, sign, label}].
+   * Columns follow the causal order (sources left, outcomes right); moderators sit above and
+   * point at the middle of the path they moderate; paths that skip a column run above the boxes;
+   * unconnected variables sit below. Every route is also given as orthogonal/straight points.
    */
-  H.pathModelSvg = function (vars, rels, opts = {}) {
+  H.modelLayout = function (vars, rels) {
     const byId = new Map(vars.map((v) => [v.id, v]));
     const effects = rels.filter((r) => r.kind !== "moderates" && byId.has(r.source_id) && byId.has(r.target_id));
     const mods = rels.filter((r) => r.kind === "moderates" && byId.has(r.source_id));
@@ -34,7 +36,7 @@
     for (const id of inEffect) if (!hasOut.has(id)) layer.set(id, maxLayer); // outcomes line up on the right
     const top = vars.filter((v) => !inEffect.has(v.id) && mods.some((m) => m.source_id === v.id));
     const bottom = vars.filter((v) => !inEffect.has(v.id) && !top.includes(v));
-    const L = maxLayer + 1, boxW = 196, boxH = 58, gapY = 26;
+    const L = maxLayer + 1, boxW = 196, boxH = 58, gapY = 26, zW = 176;
     const W = Math.max(960, L * 250 + 80);
     const cols = Array.from({ length: L }, (_, i) => vars.filter((v) => layer.get(v.id) === i)
       .sort((a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || String(a.symbol).localeCompare(String(b.symbol))));
@@ -49,58 +51,42 @@
       const total = col.length * boxH + (col.length - 1) * gapY;
       col.forEach((v, j) => pos.set(v.id, { x: colX(i), y: topPad + (bodyH - total) / 2 + j * (boxH + gapY), w: boxW }));
     });
-    const svg = mk("svg", { viewBox: `0 0 ${W} ${Ht}`, class: "model paths", role: "img", "aria-label": t("tab_model"), xmlns: NS });
-    const defs = mk("defs", {});
-    for (const [id, cls] of [["arr", "arrowhead"], ["arr-neg", "arrowhead neg"], ["arr-mod", "arrowhead modh"]]) {
-      const m = mk("marker", { id: id + (opts.idSuffix || ""), viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" });
-      m.append(mk("path", { d: "M0 0 L10 5 L0 10 z", class: cls }));
-      defs.append(m);
-    }
-    svg.append(defs);
     const box = (id) => { const p = pos.get(id); return p && { l: p.x, r: p.x + p.w, t: p.y, b: p.y + boxH, cx: p.x + p.w / 2, cy: p.y + boxH / 2 }; };
-    const edges = mk("g", { class: "edges" }), labels = mk("g", { class: "labels" });
+    const edges = [];
     const midpoint = new Map();
-    const label = (x, y, text, cls) => {
-      if (!text) return;
-      const w = text.length * 7 + 12;
-      labels.append(mk("rect", { x: x - w / 2, y: y - 10, width: w, height: 20, rx: 10, class: "lbl-bg " + (cls || "") }));
-      labels.append(mk("text", { x, y: y + 4, "text-anchor": "middle", class: "lbl " + (cls || "") }, text));
-    };
     for (const r of effects) {
       const a = box(r.source_id), b = box(r.target_id);
       if (!a || !b) continue;
-      let d, mx, my;
+      let d, pts, mx, my;
       const skip = skips.indexOf(r);
       if (skip >= 0) {
-        // skips a column: arc over the boxes in between instead of cutting through them
+        // rounded bracket: rise in the gap after the source, run above the boxes in between, drop into the target
         const lo = layer.get(r.source_id), hi = layer.get(r.target_id);
         const between = vars.filter((v) => layer.get(v.id) > lo && layer.get(v.id) < hi && pos.has(v.id));
-        const ceiling = Math.min(a.t, b.t, ...between.map((v) => pos.get(v.id).y));
-        const arcY = ceiling - 22 - 16 * skip;
-        // rounded bracket: rise in the gap after the source, run above the boxes, drop into the target
+        const arcY = Math.min(a.t, b.t, ...between.map((v) => pos.get(v.id).y)) - 22 - 16 * skip;
         const r1 = Math.min(30, (b.l - a.r) / 4);
         d = `M${a.r} ${a.cy} C ${a.r + r1} ${a.cy}, ${a.r + r1} ${arcY}, ${a.r + 2 * r1} ${arcY} L ${b.l - 2 * r1} ${arcY} C ${b.l - r1} ${arcY}, ${b.l - r1} ${b.cy}, ${b.l} ${b.cy}`;
+        pts = [[a.r, a.cy], [a.r + r1, a.cy], [a.r + r1, arcY], [b.l - r1, arcY], [b.l - r1, b.cy], [b.l, b.cy]];
         mx = (a.r + b.l) / 2; my = arcY;
       } else if (b.l > a.r + 4) {
         const c = (a.r + b.l) / 2;
         d = `M${a.r} ${a.cy} C ${c} ${a.cy}, ${c} ${b.cy}, ${b.l} ${b.cy}`;
+        pts = [[a.r, a.cy], [b.l, b.cy]];
         mx = c; my = (a.cy + b.cy) / 2;
       } else { // same column or backwards: loop underneath
         const dip = Math.max(a.b, b.b) + 46;
         d = `M${a.cx} ${a.b} C ${a.cx} ${dip}, ${b.cx} ${dip}, ${b.cx} ${b.b}`;
+        pts = [[a.cx, a.b], [a.cx, dip - 12], [b.cx, dip - 12], [b.cx, b.b]];
         mx = (a.cx + b.cx) / 2; my = dip - 12;
       }
-      const neg = r.sign === "-";
-      edges.append(mk("path", { d, class: "edge path" + (neg ? " neg" : ""), "marker-end": `url(#${neg ? "arr-neg" : "arr"}${opts.idSuffix || ""})` }));
       midpoint.set(r.id, { x: mx, y: my });
-      label(mx, my, relLabel(r), neg ? "neg" : "");
+      edges.push({ rel: r, kind: "effect", neg: r.sign === "-", d, pts, mid: { x: mx, y: my }, text: relLabel(r) });
     }
     // moderators: top row, x near the paths they moderate
     const targets = top.map((v) => {
       const xs = mods.filter((m) => m.source_id === v.id).map((m) => { const mp = midpoint.get(m.moderates_id); return mp ? mp.x : box(m.target_id)?.cx ?? W / 2; });
       return { v, x: xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : W / 2 };
     }).sort((a, b) => a.x - b.x);
-    const zW = 176;
     let lastRight = 20;
     for (const { v, x } of targets) {
       const left = Math.max(lastRight + 16, Math.min(W - zW - 20, x - zW / 2));
@@ -113,21 +99,62 @@
       const to = midpoint.get(m.moderates_id) || (box(m.target_id) ? { x: box(m.target_id).cx, y: box(m.target_id).t } : null);
       if (!to) continue;
       const endY = to.y - (midpoint.has(m.moderates_id) ? 12 : 2);
-      edges.append(mk("path", { d: `M${z.cx} ${z.b} C ${z.cx} ${(z.b + endY) / 2}, ${to.x} ${(z.b + endY) / 2}, ${to.x} ${endY}`,
-        class: "edge modl", "marker-end": `url(#arr-mod${opts.idSuffix || ""})` }));
-      label((z.cx + to.x) / 2, (z.b + endY) / 2, relLabel(m), "modl");
+      const midY = (z.b + endY) / 2;
+      edges.push({ rel: m, kind: "moderates", neg: false, text: relLabel(m), mid: { x: (z.cx + to.x) / 2, y: midY },
+        d: `M${z.cx} ${z.b} C ${z.cx} ${midY}, ${to.x} ${midY}, ${to.x} ${endY}`,
+        pts: Math.abs(z.cx - to.x) < 2 ? [[z.cx, z.b], [to.x, endY]] : [[z.cx, z.b], [z.cx, midY], [to.x, midY], [to.x, endY]] });
     }
     bottom.forEach((v, i) => pos.set(v.id, { x: W / 2 - (bottom.length * (zW + 16) - 16) / 2 + i * (zW + 16), y: topPad + bodyH + 50, w: zW }));
+    return { W, H: Ht, boxH, nodes: vars.filter((v) => pos.has(v.id)).map((v) => ({ v, ...pos.get(v.id), h: boxH })), edges };
+  };
+
+  /* Variables without explicit paths still get a model: X → (M →) Y, Z moderates, C below. */
+  H.implicitRelations = function (vars) {
+    const by = (r) => vars.filter((v) => v.role === r);
+    const X = by("iv"), Y = by("dv"), M = by("med"), Z = by("mod");
+    const rels = [];
+    let n = 0;
+    for (const x of X) for (const y of Y) {
+      if (M.length) for (const m of M) { rels.push({ id: "i" + n++, source_id: x.id, target_id: m.id, kind: "effect", sign: "", label: "" }); }
+      else rels.push({ id: "i" + n++, source_id: x.id, target_id: y.id, kind: "effect", sign: "", label: "" });
+    }
+    for (const m of M) for (const y of Y) rels.push({ id: "i" + n++, source_id: m.id, target_id: y.id, kind: "effect", sign: "", label: "" });
+    const base = rels.find((r) => X.some((x) => x.id === r.source_id));
+    for (const z of Z) if (base) rels.push({ id: "i" + n++, source_id: z.id, target_id: base.target_id, kind: "moderates", moderates_id: base.id, sign: "", label: "" });
+    return rels;
+  };
+
+  /** Draw the layout as SVG (dashboard view, preview, SVG download). */
+  H.pathModelSvg = function (vars, rels, opts = {}) {
+    const lay = H.modelLayout(vars, rels);
+    const svg = mk("svg", { viewBox: `0 0 ${lay.W} ${lay.H}`, class: "model paths", role: "img", "aria-label": t("tab_model"), xmlns: NS });
+    const defs = mk("defs", {});
+    for (const [id, cls] of [["arr", "arrowhead"], ["arr-neg", "arrowhead neg"], ["arr-mod", "arrowhead modh"]]) {
+      const m = mk("marker", { id: id + (opts.idSuffix || ""), viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" });
+      m.append(mk("path", { d: "M0 0 L10 5 L0 10 z", class: cls }));
+      defs.append(m);
+    }
+    svg.append(defs);
+    const edges = mk("g", { class: "edges" }), labels = mk("g", { class: "labels" });
+    for (const e of lay.edges) {
+      const cls = e.kind === "moderates" ? "modl" : e.neg ? "neg" : "";
+      const marker = e.kind === "moderates" ? "arr-mod" : e.neg ? "arr-neg" : "arr";
+      edges.append(mk("path", { d: e.d, class: e.kind === "moderates" ? "edge modl" : "edge path" + (e.neg ? " neg" : ""), "marker-end": `url(#${marker}${opts.idSuffix || ""})` }));
+      if (e.text) {
+        const w = e.text.length * 7 + 12;
+        labels.append(mk("rect", { x: e.mid.x - w / 2, y: e.mid.y - 10, width: w, height: 20, rx: 10, class: "lbl-bg " + cls }));
+        labels.append(mk("text", { x: e.mid.x, y: e.mid.y + 4, "text-anchor": "middle", class: "lbl " + cls }, e.text));
+      }
+    }
     svg.append(edges);
     const nodes = mk("g", { class: "nodes" });
     const linkedRq = new Set((H.state.rq_variables || []).map((l) => l.variable_id));
-    for (const v of vars) {
-      const p = pos.get(v.id);
-      if (!p) continue;
+    for (const p of lay.nodes) {
+      const v = p.v;
       const papers = opts.interactive ? H.links("variable_paper", "a", v.id).length : null;
       const g = mk("g", { class: `mnode role-${v.role}${papers === 0 ? " bare" : ""}`, tabindex: opts.interactive ? 0 : null,
         role: opts.interactive ? "button" : null, "aria-label": `${v.symbol} ${nameOf(v)}` });
-      g.append(mk("rect", { x: p.x, y: p.y, width: p.w, height: boxH, rx: 12 }));
+      g.append(mk("rect", { x: p.x, y: p.y, width: p.w, height: p.h, rx: 12 }));
       g.append(mk("text", { x: p.x + 14, y: p.y + 24, class: "sym" }, v.symbol + (opts.interactive && linkedRq.has(v.id) ? " ·RQ" : "")));
       g.append(mk("text", { x: p.x + 14, y: p.y + 44, class: "nm" }, fit(nameOf(v), papers != null ? 18 : 22)));
       if (papers != null) {
@@ -145,6 +172,7 @@
     svg.append(nodes, labels);
     return svg;
   };
+  H.nameOf = nameOf;
 
   /* ---------- relation list + editor ---------- */
   const varLabel = (v) => (v ? `${v.symbol} ${nameOf(v)}` : "?");
