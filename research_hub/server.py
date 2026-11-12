@@ -10,6 +10,7 @@ Security model (same spirit as PaperRead):
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import mimetypes
 import os
@@ -67,18 +68,20 @@ class App:
         fresh = [f for f in files if f["path"] in new]
         if not fresh:
             return None
-        self.store.mark_seen([f["path"] for f in fresh])
-        ops = integ.ops_for_files(fresh)
-        if not ops:
-            return None
+        entries, _ = integ.dedupe([o["data"] for o in integ.ops_for_files(fresh)], self.store.snapshot()["papers"])
+        ops = [{"op": "create", "entity": "paper", "data": e} for e in entries]
         names = ", ".join(f["name"] for f in fresh[:5]) + (" …" if len(fresh) > 5 else "")
-        try:
+        result = None
+        if ops:
             zh = settings.get("language") != "en"
-            return self.store.propose("folder-watcher",
-                                      f"文獻資料夾有 {len(fresh)} 個新檔案" if zh else f"{len(fresh)} new file(s) in reference folders",
-                                      ops, (f"找到：{names}" if zh else f"Found: {names}"))
-        except ValidationError:
-            return None
+            try:
+                result = self.store.propose("folder-watcher",
+                                            f"文獻資料夾有 {len(fresh)} 個新檔案" if zh else f"{len(fresh)} new file(s) in reference folders",
+                                            ops, (f"找到：{names}" if zh else f"Found: {names}"))
+            except ValidationError:
+                return None  # not marked seen: offered again on the next scan
+        self.store.mark_seen([f["path"] for f in fresh])
+        return result
 
     def watch_loop(self, interval: float = 30.0) -> None:
         while not self.stop.wait(interval):
@@ -287,7 +290,15 @@ def make_handler(app: App):
             if not self._user_ok():
                 return self._error(403, "missing or invalid page token; reload the dashboard")
             if path == "/api/state":
-                return self._json(200, store.snapshot())
+                body = json.dumps(store.snapshot(), ensure_ascii=False).encode("utf-8")
+                etag = '"' + hashlib.sha1(body).hexdigest()[:20] + '"'
+                if self.headers.get("If-None-Match") == etag:
+                    self.send_response(304)
+                    self.send_header("ETag", etag)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return None
+                return self._send(200, body, "application/json; charset=utf-8", {"ETag": etag, "Cache-Control": "no-cache"})
             if path == "/api/proposals":
                 return self._json(200, {"items": store.list_proposals(q1("status", "pending"))})
             if path == "/api/agent-config":
@@ -376,17 +387,24 @@ def make_handler(app: App):
                 return self._json(200, {"approved": done, "failed": failed})
             if path == "/api/upload":
                 name = unquote(self.headers.get("X-Filename", "")).strip()
-                name = re.sub(r"[\\/:*?\"<>|\x00-\x1f]", "_", Path(name).name)[:180] or "upload.bin"
-                stage_id = int(q1("stage_id", "0") or 0) or None
-                paper_id = int(q1("paper_id", "0") or 0) or None
+                name = re.sub(r"[\\/:*?\"<>|\x00-\x1f]", "_", Path(name).name)[:180].strip()
+                if not name.strip("."):
+                    name = "upload.bin"
+                try:
+                    stage_id = int(q1("stage_id", "0") or 0) or None
+                    paper_id = int(q1("paper_id", "0") or 0) or None
+                except ValueError:
+                    raise ValidationError("stage_id and paper_id must be numbers") from None
                 if stage_id and not store.get("stage", stage_id):
                     raise ValidationError("unknown stage")
                 if paper_id and not store.get("paper", paper_id):
                     raise ValidationError("unknown paper")
-                folder = f"stage-{stage_id}" if stage_id else (f"paper-{paper_id}" if paper_id else "general")
-                data = self._body(MAX_UPLOAD)
-                if not data:
+                length = int(self.headers.get("Content-Length") or 0)
+                if length <= 0:
                     raise ValidationError("empty file")
+                if length > MAX_UPLOAD:
+                    raise ValidationError(f"file too large (limit {MAX_UPLOAD // (1024 * 1024)} MB)")
+                folder = f"stage-{stage_id}" if stage_id else (f"paper-{paper_id}" if paper_id else "general")
                 target_dir = store.root / "uploads" / folder
                 target_dir.mkdir(parents=True, exist_ok=True)
                 stem, suffix = Path(name).stem, Path(name).suffix
@@ -394,10 +412,23 @@ def make_handler(app: App):
                 while target.exists():
                     n += 1
                     target = target_dir / f"{stem} ({n}){suffix}"
-                target.write_bytes(data)
+                remaining = length
+                try:  # stream to disk in chunks instead of holding the whole file in memory
+                    with target.open("wb") as fh:
+                        while remaining:
+                            chunk = self.rfile.read(min(1024 * 1024, remaining))
+                            if not chunk:
+                                break
+                            fh.write(chunk)
+                            remaining -= len(chunk)
+                    if remaining:
+                        raise ValidationError("upload interrupted")
+                except BaseException:
+                    target.unlink(missing_ok=True)
+                    raise
                 rel = target.relative_to(store.root / "uploads").as_posix()
                 res = store.apply_ops([{"op": "create", "entity": "file", "data": {
-                    "name": target.name, "stored": rel, "size": len(data), "stage_id": stage_id, "paper_id": paper_id,
+                    "name": target.name, "stored": rel, "size": length, "stage_id": stage_id, "paper_id": paper_id,
                     "mime": mimetypes.guess_type(target.name)[0] or ""}}], actor="user", allow_internal=True)
                 return self._json(200, {"id": res[0]["id"], "name": target.name})
             if path == "/api/import/bibtex":
@@ -405,41 +436,49 @@ def make_handler(app: App):
                 entries = integ.parse_bibtex(text) or integ.parse_ris(text)
                 if not entries:
                     raise ValidationError("no BibTeX/RIS entries found")
-                ops = [{"op": "create", "entity": "paper", "data": {**e, "source": "bibtex"}} for e in entries]
-                store.apply_ops(ops, actor="user")
-                return self._json(200, {"imported": len(entries)})
+                entries, skipped = integ.dedupe(entries, store.snapshot()["papers"])
+                if entries:
+                    store.apply_ops([{"op": "create", "entity": "paper", "data": {**e, "source": "bibtex"}} for e in entries], actor="user")
+                return self._json(200, {"imported": len(entries), "skipped": skipped})
             if path == "/api/import/files":
                 data = self._payload()
                 wanted = set(data.get("paths") or [])
                 files = [f for f in integ.scan_folders(store.settings().get("reference_folders") or []) if f["path"] in wanted]
                 if not files:
                     raise ValidationError("no matching files in the configured folders")
-                ops = integ.ops_for_files(files)
-                if not ops:
-                    raise ValidationError("no references found in the selected files")
-                store.apply_ops(ops, actor="user")
+                entries, skipped = integ.dedupe([o["data"] for o in integ.ops_for_files(files)], store.snapshot()["papers"])
+                if entries:
+                    store.apply_ops([{"op": "create", "entity": "paper", "data": e} for e in entries], actor="user")
                 store.mark_seen([f["path"] for f in files])
-                return self._json(200, {"imported": len(ops)})
+                return self._json(200, {"imported": len(entries), "skipped": skipped})
             if path == "/api/watch/scan":
                 result = app.watch_once()
                 return self._json(200, {"proposal": result})
             if path == "/api/paperread/sync":
                 settings = store.settings()
-                items = integ.paperread_items(settings.get("paperread_library", ""))
+                skipped: list[str] = []
+                items = integ.paperread_items(settings.get("paperread_library", ""), skipped)
                 if not items:
                     raise ValidationError("PaperRead library not found or empty — check the library path in Settings")
+                # A newer sync replaces older pending sync proposals, so approving both can never duplicate.
+                for old_p in store.list_proposals("pending"):
+                    if old_p["source"] == "PaperRead sync":
+                        store.decide(old_p["id"], False)
                 snap = store.snapshot()
-                ops, stats = integ.paperread_sync_ops(items, snap["papers"], snap["variables"])
+                ops, stats = integ.paperread_sync_ops(items, snap["papers"], snap["variables"], snap["variable_papers"])
+                stats["skipped"] = len(skipped)
                 if not ops:
-                    return self._json(200, {"proposal": None, "stats": stats})
+                    return self._json(200, {"proposal": None, "stats": stats, "skipped": skipped})
                 if settings.get("language") == "en":
                     title = f"PaperRead: {stats['new']} new, {stats['status']} status, {stats['variables']} variables"
-                    summary = "Papers, reading status and variables found in the PaperRead library."
+                    summary = "Papers, reading status and variables found in the PaperRead library." + (
+                        f" Skipped unreadable folders: {', '.join(skipped[:10])}." if skipped else "")
                 else:
                     title = f"PaperRead：新文獻 {stats['new']} 篇、狀態更新 {stats['status']} 筆、變數 {stats['variables']} 個"
-                    summary = "從 PaperRead 文獻庫找到的論文、閱讀狀態與研究變數。"
+                    summary = "從 PaperRead 文獻庫找到的論文、閱讀狀態與研究變數。" + (
+                        f"已略過無法讀取的資料夾：{'、'.join(skipped[:10])}。" if skipped else "")
                 proposal = store.propose("PaperRead sync", title, ops, summary)
-                return self._json(200, {"proposal": proposal, "stats": stats})
+                return self._json(200, {"proposal": proposal, "stats": stats, "skipped": skipped})
             if path == "/api/scripts/run":
                 settings = store.settings()
                 if not settings.get("allow_code_run"):
@@ -482,7 +521,7 @@ def make_handler(app: App):
             if path == "/api/agent/state":
                 snap = store.snapshot()
                 snap.pop("activity", None)
-                snap.pop("settings", None)
+                snap["language"] = snap.pop("settings", {}).get("language", "zh")
                 snap["schema"] = {name: {"fields": {f: [s[0], list(s[1]) if isinstance(s[1], tuple) and s[0] == "enum" else s[1]]
                                                     for f, s in spec["fields"].items()}, "required": list(spec["required"])}
                                   for name, spec in ENTITIES.items() if not spec.get("internal")}

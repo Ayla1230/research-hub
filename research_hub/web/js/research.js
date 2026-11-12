@@ -94,6 +94,11 @@
         data[name] = kind === "number" ? Number(v || 0) : v;
       }
       if (defaults) for (const [k, v] of Object.entries(defaults)) if (!(k in data)) data[k] = v;
+      if (item) {
+        // Send only what was changed here, so updates approved while the dialog was open survive.
+        for (const k of Object.keys(data)) if (String(data[k] ?? "") === String(item[k] ?? "")) delete data[k];
+        if (!Object.keys(data).length) { H.closeLayer(); return; }
+      }
       const op = item ? { op: "update", entity, id: item.id, data } : { op: "create", entity, data };
       try { await H.ops([op], true); H.closeLayer(); H.toast(t("saved"), "ok"); } catch (e) { H.toast(e.message, "error"); }
     };
@@ -254,7 +259,7 @@
     }));
     const bibInput = el("input", { type: "file", accept: ".bib,.ris,.txt", hidden: true, onchange: async () => {
       const f = bibInput.files[0]; if (!f) return;
-      try { const out = await H.api("/api/import/bibtex", { body: await f.text(), headers: { "Content-Type": "text/plain" } }); H.toast(t("imported", { n: out.imported }), "ok"); await H.refresh(); }
+      try { const out = await H.api("/api/import/bibtex", { body: await f.text(), headers: { "Content-Type": "text/plain" } }); H.toast(t("imported", { n: out.imported }) + (out.skipped ? " · " + t("dup_skipped", { n: out.skipped }) : ""), "ok"); await H.refresh(true); }
       catch (e) { H.toast(e.message, "error"); }
       bibInput.value = "";
     } });

@@ -193,7 +193,7 @@ class ValidationError(ValueError):
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def _clean(entity: str, name: str, spec: tuple, value):
@@ -534,6 +534,9 @@ class Store:
                 clean["role"] = "iv"
             if entity == "stage" and not clean.get("title_en"):
                 clean["title_en"] = clean["title_zh"]
+            if entity == "paper" and clean.get("paperread_id") and db.execute(
+                    "SELECT 1 FROM papers WHERE paperread_id=?", (clean["paperread_id"],)).fetchone():
+                raise ValidationError(f"PaperRead paper {clean['paperread_id']} is already in the library")
             cols = list(clean) + ["created", "updated"]
             db.execute(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                        [*clean.values(), stamp, stamp])
@@ -620,9 +623,11 @@ class Store:
                 extra[field] = _clean(name, field, spec["extra"][field], value)
             cols = [a_col, b_col, *extra, "created"]
             update = ", ".join(f"{k}=excluded.{k}" for k in extra) or f"{a_col}=excluded.{a_col}"
+            # "keep": add the link only if missing — never overwrite the user's evidence/note.
+            conflict = "DO NOTHING" if op.get("keep") else f"DO UPDATE SET {update}"
             db.execute(
                 f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})"
-                f" ON CONFLICT({a_col}, {b_col}) DO UPDATE SET {update}",
+                f" ON CONFLICT({a_col}, {b_col}) {conflict}",
                 [a, b, *extra.values(), now()],
             )
             self._log(db, actor, "link", name, a, pair + (f" ({extra['evidence']})" if extra.get("evidence") else ""))

@@ -118,6 +118,8 @@
     go_core: ["前往研究核心", "Open research core"], go_hub: ["前往整合中心", "Open integration hub"],
     writing_hint: ["匯出已收錄文獻的 BibTeX，貼到 Zotero／LaTeX／Word 引用工具使用。", "Export the library as BibTeX for Zotero, LaTeX or Word citation tools."],
     current: ["目前", "Current"], next_due: ["最近截止", "Next deadline"], none_due: ["無", "None"],
+    sections: ["頁面區塊", "Sections"], dup_skipped: ["略過 {n} 筆重複", "{n} duplicate(s) skipped"],
+    pr_skipped: ["{n} 個資料夾無法讀取已略過", "{n} unreadable folder(s) skipped"],
     conflict: ["提案後此項目已被修改，套用會覆蓋較新的內容", "Changed since this was proposed — approving overwrites newer data"],
     e_file: ["檔案", "File"], e_proposal: ["提案", "Proposal"], e_settings: ["設定", "Settings"], e_activity: ["動態", "Activity"],
     e_rq_variable: ["RQ ↔ 變數", "RQ ↔ variable"], e_rq_paper: ["RQ ↔ 文獻", "RQ ↔ paper"], e_variable_paper: ["變數 ↔ 文獻", "Variable ↔ paper"],

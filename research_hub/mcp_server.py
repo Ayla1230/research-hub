@@ -99,8 +99,9 @@ def call_tool(hub: Hub, name: str, args: dict):
     if name == "get_overview":
         s = hub.state()
         open_tasks = {}
+        done_stages = {st["id"] for st in s["stages"] if st["status"] == "done"}
         for t in s["tasks"]:
-            if not t["done"]:
+            if not t["done"] and t["stage_id"] not in done_stages:
                 open_tasks.setdefault(t["stage_id"], []).append({"id": t["id"], "title": t["title"]})
         return {
             "overall_progress": s["overall"],
@@ -135,7 +136,17 @@ def call_tool(hub: Hub, name: str, args: dict):
             ops.append({"op": "update", "entity": "task", "id": int(tid), "data": {"done": True}})
         if not ops:
             raise ValueError("nothing to report: give status, progress, note or done_task_ids")
-        title = f"Stage '{args['stage_key']}' update" + (f" → {args['status']}" if args.get("status") else "")
+        s = hub.state()
+        stage = next((st for st in s["stages"] if st["key"] == args["stage_key"]), None)
+        if not stage:
+            raise ValueError(f"no stage with key {args['stage_key']!r}")
+        if s.get("language") == "en":
+            title = f"Stage “{stage['title_en'] or stage['title_zh']}” update" + (f" → {args['status']}" if args.get("status") else "")
+        else:
+            labels = {"todo": "未開始", "active": "進行中", "review": "審閱中", "done": "已完成", "blocked": "受阻"}
+            title = f"階段「{stage['title_zh']}」更新" + (f" → {labels.get(args['status'], args['status'])}" if args.get("status") else "")
+        if "progress" in args:
+            title += f"（{args['progress']}%）" if s.get("language") != "en" else f" ({args['progress']}%)"
         return hub.propose(title, ops, args.get("summary", ""))
     if name == "propose_papers":
         ops = []
@@ -149,7 +160,9 @@ def call_tool(hub: Hub, name: str, args: dict):
                 ops.append({"op": "link", "link": "rq_paper", "a": int(rid), "b": f"$p{i}"})
         if not ops:
             raise ValueError("no papers given")
-        return hub.propose(f"{len(args['papers'])} paper(s) suggested", ops, args.get("summary", ""))
+        n = len(args["papers"])
+        title = f"{n} paper(s) suggested" if hub.state().get("language") == "en" else f"建議加入 {n} 篇文獻"
+        return hub.propose(title, ops, args.get("summary", ""))
     if name == "check_proposals":
         items = hub.proposals(args.get("status") or "all")["items"]
         return [{"id": p["id"], "title": p["title"], "status": p["status"], "created": p["created"], "decided": p["decided"]} for p in items]

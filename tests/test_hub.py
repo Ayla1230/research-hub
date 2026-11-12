@@ -268,9 +268,19 @@ class IntegrationTests(unittest.TestCase):
             (p / "item.json").write_text(json.dumps({"status": "reading", "tags": ["t1"]}), encoding="utf-8")
             (d / "broken").mkdir()
             (d / "broken" / "paper.json").write_text("{not json", encoding="utf-8")
-            items = integ.paperread_items(str(d))
-            broken = next(i for i in items if i["paperread_id"] == "broken")  # unreadable JSON is listed, not fatal
-            self.assertEqual((broken["title"], broken["status"]), ("broken", "to_read"))
+            (d / "weird").mkdir()
+            (d / "weird" / "paper.json").write_text(json.dumps({"meta": {"title_en": "Weird", "authors": ["A", "B"]},
+                "variables": [{"role": "mod", "en": "Age"}, "junk"]}), encoding="utf-8")
+            (d / "weird" / "item.json").write_text(json.dumps({"tags": "ai, trust", "status": ["x"]}), encoding="utf-8")
+            (d / "array").mkdir()
+            (d / "array" / "paper.json").write_text("[1, 2]", encoding="utf-8")
+            skipped = []
+            items = integ.paperread_items(str(d), skipped)
+            self.assertEqual(sorted(skipped), ["array", "broken"])
+            weird = next(i for i in items if i["paperread_id"] == "weird")
+            self.assertEqual((weird["authors"], weird["tags"], weird["status"]), ("A ; B", "ai, trust", "to_read"))
+            self.assertEqual(weird["variables"], [{"role": "mod", "en": "Age", "zh": "", "abbr": ""}])
+            items = [i for i in items if i["paperread_id"] == "abc123"]
             item = next(i for i in items if i["paperread_id"] == "abc123")
             self.assertEqual((item["year"], item["status"]), (2022, "reading"))
             dd = tempfile.mkdtemp()
@@ -284,8 +294,16 @@ class IntegrationTests(unittest.TestCase):
             snap = store.snapshot()
             self.assertEqual({v["symbol"] for v in snap["variables"]}, {"X1", "Y1"})
             self.assertEqual(len(snap["variable_papers"]), 2)
-            ops2, stats2 = integ.paperread_sync_ops([item], snap["papers"], snap["variables"])
-            self.assertEqual(stats2, {"new": 0, "status": 0, "variables": 0})
+            # user sets evidence; a re-sync must neither duplicate nor overwrite it
+            store.apply_ops([{"op": "link", "link": "variable_paper", "a": snap["variable_papers"][0]["variable_id"],
+                              "b": snap["variable_papers"][0]["paper_id"], "data": {"evidence": "supports"}}])
+            snap = store.snapshot()
+            ops2, stats2 = integ.paperread_sync_ops([item], snap["papers"], snap["variables"], snap["variable_papers"])
+            self.assertEqual((ops2, stats2), ([], {"new": 0, "status": 0, "variables": 0}))
+            ops3, _ = integ.paperread_sync_ops([item], [], [])
+            with self.assertRaises(ValidationError):  # duplicate PaperRead paper is refused at apply time
+                store.apply_ops(ops3)
+            self.assertIn("supports", {l["evidence"] for l in store.snapshot()["variable_papers"]})
             shutil.rmtree(dd, ignore_errors=True)
         finally:
             shutil.rmtree(d, ignore_errors=True)
@@ -395,6 +413,11 @@ class ServerTests(unittest.TestCase):
         self.assertEqual((code, json.loads(body)["imported"]), (200, 1))
         code, body = self.req("/api/export/bibtex")
         self.assertIn(b"Imported", body)
+        code, body2 = self.req("/api/import/bibtex", raw=body, headers={"Content-Type": "text/plain"})
+        self.assertEqual(json.loads(body2)["imported"], 0)
+        self.assertEqual(self.req("/api/upload?stage_id=abc", raw=b"x", headers={"X-Filename": "a.txt"})[0], 400)
+        code, body = self.req("/api/upload", raw=b"x", headers={"X-Filename": ".."})
+        self.assertEqual(json.loads(body)["name"], "upload.bin")
 
     def test_script_run_disabled_by_default(self):
         code, body = self.req("/api/scripts/run", {"path": "/tmp/x.py"})

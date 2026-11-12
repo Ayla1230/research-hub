@@ -53,8 +53,8 @@
       due ? el("span.node-due." + (due.kind || "plain"), null, due.text) : null);
 
     const tools = H.ui.editPipeline ? el("div.node-tools", null,
-      H.btn(t("move_left"), { icon: "chevL", iconOnly: true, small: true, variant: "ghost", disabled: index === 0, onclick: () => move(stage, -1) }),
-      H.btn(t("move_right"), { icon: "chevR", iconOnly: true, small: true, variant: "ghost", disabled: index === total - 1, onclick: () => move(stage, 1) }),
+      H.btn(t("move_left"), { icon: "chevL", iconOnly: true, small: true, variant: "ghost", disabled: index === 0, onclick: () => move(stage, -1), dataset: { fkey: "move-l-" + stage.id } }),
+      H.btn(t("move_right"), { icon: "chevR", iconOnly: true, small: true, variant: "ghost", disabled: index === total - 1, onclick: () => move(stage, 1), dataset: { fkey: "move-r-" + stage.id } }),
       H.btn(t("delete"), { icon: "trash", iconOnly: true, small: true, variant: "ghost", disabled: total <= 1, onclick: () => removeStage(stage) })) : null;
 
     return el("li.node." + stage.status + (open ? ".open" : ""), { style: { "--i": index } }, button, tools);
@@ -67,11 +67,17 @@
     if (j < 0 || j >= list.length) return;
     [list[i], list[j]] = [list[j], list[i]];
     await H.ops(list.map((s, k) => ({ op: "update", entity: "stage", id: s.id, data: { position: k } })));
+    const btn = document.querySelector(`[data-fkey="move-${dir < 0 ? "l" : "r"}-${stage.id}"]`);
+    if (btn && btn.disabled) document.querySelector(`[data-fkey="move-${dir < 0 ? "r" : "l"}-${stage.id}"]`)?.focus();
   }
   async function removeStage(stage) {
     if (!(await H.confirm(t("delete_stage_q")))) return;
     if (H.ui.openStage === stage.id) H.ui.openStage = null;
+    const list = H.state.stages;
+    const i = list.findIndex((s) => s.id === stage.id);
+    const neighbour = list[i + 1] || list[i - 1];
     await H.ops([{ op: "delete", entity: "stage", id: stage.id }]);
+    if (neighbour) document.querySelector(`.node-btn[data-stage="${neighbour.id}"]`)?.focus();
   }
   async function addStage() {
     const pos = H.state.stages.length;

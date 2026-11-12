@@ -133,7 +133,7 @@ def _bib_value(text: str, i: int) -> tuple[str, int]:
 
 def _tidy(value: str) -> str:
     value = re.sub(r"\\[a-zA-Z]+\{([^}]*)\}", r"\1", value)
-    value = value.replace("{", "").replace("}", "").replace("\\&", "&")
+    value = re.sub(r"\\([&%$#_])", r"\1", value.replace("{", "").replace("}", ""))
     return re.sub(r"\s+", " ", value).strip()
 
 
@@ -207,23 +207,55 @@ def parse_ris(text: str) -> list[dict]:
     return out
 
 
+_TEX_SPECIAL = re.compile(r"([&%$#_])")
+
+
+def _tex(value) -> str:
+    return _TEX_SPECIAL.sub(r"\\\1", str(value).replace("{", "").replace("}", ""))
+
+
 def to_bibtex(papers: list[dict]) -> str:
     chunks, used = [], set()
-    for p in papers:
-        first = re.sub(r"[^A-Za-z]", "", (p.get("authors") or "anon").split(";")[0].split(",")[0].split(" ")[-1]) or "anon"
-        word = re.sub(r"[^A-Za-z]", "", (p.get("title") or "x").split(" ")[0]) or "x"
-        key = p.get("citekey") or f"{first.lower()}{p.get('year') or ''}{word.lower()}"
-        base, n = key, 1
+    for n, p in enumerate(papers, 1):
+        first = re.sub(r"[^A-Za-z]", "", (p.get("authors") or "").split(";")[0].split(",")[0].split(" ")[-1])
+        word = re.sub(r"[^A-Za-z]", "", (p.get("title") or "").split(" ")[0])
+        key = p.get("citekey") or (f"{first.lower()}{p.get('year') or ''}{word.lower()}" if first and word else f"ref{p.get('year') or ''}_{p.get('id') or n}")
+        key = re.sub(r"[^\w:.-]", "", key) or f"ref{n}"
+        base, k = key, 1
         while key in used:
-            n += 1
-            key = f"{base}{chr(96 + n)}"
+            k += 1
+            key = f"{base}{chr(96 + k)}"
         used.add(key)
         authors = " and ".join(a.strip() for a in (p.get("authors") or "").split(";") if a.strip())
         fields = [("title", p.get("title")), ("author", authors), ("year", p.get("year") or ""),
-                  ("journal", p.get("venue")), ("doi", p.get("doi")), ("url", p.get("url"))]
-        body = ",\n".join(f"  {k} = {{{v}}}" for k, v in fields if v)
+                  ("journal", p.get("venue")), ("doi", p.get("doi")), ("url", p.get("url")),
+                  ("abstract", p.get("abstract")), ("keywords", p.get("tags"))]
+        body = ",\n".join(f"  {k} = {{{v if k in ('doi', 'url') else _tex(v)}}}" for k, v in fields if v)
         chunks.append(f"@article{{{key},\n{body}\n}}")
     return "\n\n".join(chunks) + "\n"
+
+
+def _norm_title(title: str) -> str:
+    return re.sub(r"[\W_]+", "", (title or "").casefold())
+
+
+def dedupe(entries: list[dict], papers: list[dict]) -> tuple[list[dict], int]:
+    """Drop entries already in the library (or repeated in the batch) by DOI, cite key or title."""
+    dois = {p["doi"].lower() for p in papers if p.get("doi")}
+    keys = {p["citekey"] for p in papers if p.get("citekey")}
+    titles = {_norm_title(p["title"]) for p in papers if p.get("title")}
+    paths = {p["local_path"] for p in papers if p.get("local_path")}
+    out, skipped = [], 0
+    for e in entries:
+        doi, key, title = (e.get("doi") or "").lower(), e.get("citekey") or "", _norm_title(e.get("title", ""))
+        if (doi and doi in dois) or (key and key in keys) or (title and title in titles) or (e.get("local_path") and e["local_path"] in paths):
+            skipped += 1
+            continue
+        out.append(e)
+        dois.add(doi) if doi else None
+        keys.add(key) if key else None
+        titles.add(title) if title else None
+    return out, skipped
 
 
 # ---------------------------------------------------------------- OpenAlex
@@ -275,9 +307,22 @@ def _read_json(path: Path) -> dict:
         return {}
 
 
-def paperread_items(library: str) -> list[dict]:
+def _text(value, limit: int) -> str:
+    """Strings as-is; lists joined with ' ; '; anything else ignored."""
+    if isinstance(value, str):
+        return value.strip()[:limit]
+    if isinstance(value, (list, tuple)):
+        return " ; ".join(str(x).strip() for x in value if isinstance(x, (str, int, float)) and str(x).strip())[:limit]
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)[:limit]
+    return ""
+
+
+def paperread_items(library: str, skipped: list | None = None) -> list[dict]:
     """Read a PaperRead library folder (read-only). Each paper lives in its own
-    folder with paper.json (metadata, extracted variables) and item.json (status)."""
+    folder with paper.json (metadata, extracted variables) and item.json (status).
+    Folders whose paper.json is unreadable or malformed are skipped (and listed in
+    ``skipped`` when given), never guessed at."""
     root = expand(library)
     if not root.is_dir():
         return []
@@ -286,33 +331,51 @@ def paperread_items(library: str) -> list[dict]:
         if not folder.is_dir() or folder.name.startswith(".") or not (folder / "paper.json").exists():
             continue
         paper = _read_json(folder / "paper.json")
+        meta = paper.get("meta") if isinstance(paper, dict) else None
+        if not isinstance(meta, dict):
+            if skipped is not None:
+                skipped.append(folder.name)
+            continue
         item = _read_json(folder / "item.json")
-        meta = dict(paper.get("meta") or {})
-        meta.update({k: v for k, v in (item.get("meta_override") or {}).items() if v})
+        item = item if isinstance(item, dict) else {}
+        meta = dict(meta)
+        override = item.get("meta_override")
+        if isinstance(override, dict):
+            meta.update({k: v for k, v in override.items() if v})
         year = meta.get("year") or 0
-        if not year:
+        if not year or not str(year).isdigit():
             m = re.search(r"(19|20)\d{2}", str(meta.get("date", "")))
             year = int(m.group(0)) if m else 0
+        raw_vars = paper.get("variables")
+        raw_vars = raw_vars.get("items") if isinstance(raw_vars, dict) else raw_vars
         variables = []
-        for v in ((paper.get("variables") or {}).get("items") or []):
+        for v in raw_vars if isinstance(raw_vars, list) else []:
+            if not isinstance(v, dict):
+                continue
             role = _ROLE.get(str(v.get("role", "")).lower())
-            if role and (v.get("en") or v.get("zh")):
-                variables.append({"role": role, "en": str(v.get("en", ""))[:120], "zh": str(v.get("zh", ""))[:80],
-                                  "abbr": str(v.get("abbr", ""))[:20]})
+            en, zh = _text(v.get("en"), 120), _text(v.get("zh"), 80)
+            if role and (en or zh):
+                variables.append({"role": role, "en": en, "zh": zh, "abbr": _text(v.get("abbr"), 20)})
+        tags = item.get("tags")
+        tags = [t.strip() for t in tags.split(",")] if isinstance(tags, str) else tags if isinstance(tags, list) else []
+        status = item.get("status") if isinstance(item.get("status"), str) else "unread"
         out.append({
             "paperread_id": folder.name,
-            "title": meta.get("title_en") or meta.get("title_zh") or folder.name,
-            "title_zh": meta.get("title_zh", ""), "authors": str(meta.get("authors", ""))[:500],
-            "year": int(year) if str(year).isdigit() else 0, "venue": meta.get("venue", ""), "doi": meta.get("doi", ""),
-            "status": _STATUS.get(item.get("status", "unread"), "to_read"), "tags": ", ".join(item.get("tags") or [])[:500],
+            "title": _text(meta.get("title_en"), 500) or _text(meta.get("title_zh"), 500) or folder.name,
+            "title_zh": _text(meta.get("title_zh"), 500), "authors": _text(meta.get("authors"), 500),
+            "year": int(year) if str(year).isdigit() else 0, "venue": _text(meta.get("venue"), 300), "doi": _text(meta.get("doi"), 200),
+            "status": _STATUS.get(status, "to_read"),
+            "tags": ", ".join(str(t).strip() for t in tags if isinstance(t, (str, int)) and str(t).strip())[:500],
             "variables": variables,
         })
     return out
 
 
-def paperread_sync_ops(items: list[dict], papers: list[dict], variables: list[dict]) -> tuple[list[dict], dict]:
+def paperread_sync_ops(items: list[dict], papers: list[dict], variables: list[dict],
+                       links: list[dict] | None = None) -> tuple[list[dict], dict]:
     """Ops that bring PaperRead's library into the hub: new papers, reading-status
     changes, and variables PaperRead extracted, linked to their paper."""
+    linked = {(l["variable_id"], l["paper_id"]) for l in links or []}
     by_pr = {p["paperread_id"]: p for p in papers if p.get("paperread_id")}
     by_doi = {p["doi"].lower(): p for p in papers if p.get("doi")}
     known_vars = {(v["name_en"] or "").casefold(): v for v in variables if v.get("name_en")}
@@ -363,7 +426,10 @@ def paperread_sync_ops(items: list[dict], papers: list[dict], variables: list[di
                     "notes": f"From PaperRead ({v['abbr']})" if v["abbr"] else "From PaperRead"}})
                 var_ref = new_vars[key] = f"${ref}"
                 stats["variables"] += 1
-            ops.append({"op": "link", "link": "variable_paper", "a": var_ref, "b": paper_ref, "data": {"evidence": "mentions"}})
+            if isinstance(var_ref, int) and isinstance(paper_ref, int) and (var_ref, paper_ref) in linked:
+                continue  # already linked: keep the user's evidence and note
+            # "keep": never overwrite an existing link if one appears before approval
+            ops.append({"op": "link", "link": "variable_paper", "a": var_ref, "b": paper_ref, "data": {"evidence": "mentions"}, "keep": True})
     return ops, stats
 
 

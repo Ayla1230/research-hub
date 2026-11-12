@@ -11,7 +11,7 @@
       el("a.brand", { href: "/" + H.lang + "/", "aria-label": t("app") },
         el("span.mark", { "aria-hidden": "true" }, el("i"), el("i"), el("i")),
         el("span.brand-name", null, "Research Hub"), el("span.brand-sub", null, "研究進度中樞")),
-      el("nav.jump", { "aria-label": "Sections" },
+      el("nav.jump", { "aria-label": t("sections") },
         [["pipeline", t("pipeline")], ["core", t("core")], ["hub", t("hub")], ["activity", t("activity")]].map(([id, label]) =>
           el("a", { href: "#" + id }, label))),
       el("div.top-actions", null,

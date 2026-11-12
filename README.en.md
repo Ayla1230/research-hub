@@ -13,11 +13,11 @@ Python 3.10+ only — **no packages to install** (standard library only).
 ./start.sh            # macOS / Linux, from the repository root
 start.cmd             # Windows
 ./start.sh --demo     # explore with sample data (a TAM study)
-./start.sh --lang en  # new workspace with English tasks and UI
+./start.sh --lang en  # new workspace with English tasks and UI (default tasks are written in the workspace's starting language; edit them freely)
 ```
 
 Open <http://127.0.0.1:8770/>. The root `/` is the dashboard; `/zh/` and `/en/` switch language (also from the top bar).
-**Run it on your own computer**: everything happens on `127.0.0.1`, so it uses no network traffic, and no web fonts are downloaded. Only OpenAlex searches and the external database links go online.
+**Run it on your own computer**: everything happens on `127.0.0.1`, so data never leaves your computer and no Internet traffic is used, and no web fonts are downloaded. Only OpenAlex searches and the external database links go online.
 
 Data lives in `~/ResearchHub` by default (`--data <folder>` or `RESEARCH_HUB_HOME`); change the port with `--port` or `RESEARCH_HUB_PORT`.
 
@@ -30,7 +30,7 @@ Data lives in `~/ResearchHub` by default (`--data <folder>` or `RESEARCH_HUB_HOM
 | **Research core** | A dedicated board for RQs, variables (X independent, Y dependent, M mediator, Z moderator, C control) and papers. Every variable links to its papers with a relation (supports, contradicts, mixed, defines, measure source, mentions); variables without literature support are flagged. |
 | **Variable × paper matrix** | See at a glance which papers back which variable; click a cell to cycle the relation. |
 | **Research model** | Draws the X → M → Y model with moderators and controls from variable roles. |
-| **Literature** | OpenAlex search, BibTeX/RIS import & export, reading status, rating, tags, open local PDF, open in PaperRead. |
+| **Literature** | OpenAlex search, BibTeX/RIS import & export (duplicates skipped by DOI, cite key or title), reading status, rating, tags, open local PDF, open in PaperRead. |
 | **Integration hub** | One-click search across databases (Google Scholar, Semantic Scholar, arXiv, PubMed, Scopus, Web of Science, Airiti, NDLTD — add your own with `{q}` in the URL); scan and import local reference folders; sync a PaperRead library; MCP tool registry; Python code folder and script runs; all uploaded files. |
 | **Live updates + confirmation** | When an agent finishes a task, a new file appears in a watched folder, or a PaperRead sync finds new papers or variables, the change waits in the **Inbox**. You approve it (optionally only some of its changes) before anything is written. The dashboard refreshes live over Server-Sent Events. |
 | **Activity & backup** | Every change records who made it (you, an agent, the folder watcher) and when; export a full JSON backup or BibTeX. |
@@ -61,6 +61,7 @@ Operations: `create` / `update` (optionally `"append": {"notes": "…"}`) / `del
 
 - **Links**: set the PaperRead URL (default `http://127.0.0.1:8765`); papers synced from PaperRead get an "Open in PaperRead" button.
 - **Sync**: set the PaperRead library folder (default `~/PaperRead/library`). "Sync library" reads each paper's `paper.json` / `item.json` read-only and turns new papers, reading-status changes and the variables PaperRead extracted (independent, dependent, mediator, moderator, control) into one proposal, with variable–paper links.
+- Re-syncing never duplicates: a new sync replaces an unconfirmed older one, existing papers and the relations you set are kept, and unreadable folders are skipped and listed.
 - Research Hub never writes to PaperRead's files.
 
 ## Python code

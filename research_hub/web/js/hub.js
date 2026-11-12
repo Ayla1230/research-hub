@@ -97,7 +97,7 @@
           fresh.length ? H.btn(t("import_selected"), { icon: "plus", small: true, variant: "primary", onclick: async () => {
             const paths = [...checks].filter(([, b]) => b.checked).map(([p]) => p);
             if (!paths.length) return H.toast(t("select_none"), "error");
-            try { const out = await H.api("/api/import/files", { body: { paths } }); H.toast(t("imported", { n: out.imported }), "ok"); scan = null; await H.refresh(); }
+            try { const out = await H.api("/api/import/files", { body: { paths } }); H.toast(t("imported", { n: out.imported }) + (out.skipped ? " · " + t("dup_skipped", { n: out.skipped }) : ""), "ok"); scan = null; await H.refresh(true); }
             catch (e) { H.toast(e.message, "error"); }
           } }) : null);
       }
@@ -118,7 +118,11 @@
       el("div.toolbar", null,
         el("a.btn.outline.sm", { href: H.safeUrl(s.paperread_url) || "#", target: "_blank", rel: "noopener" }, H.icon("external", 14), el("span", null, t("pr_open"))),
         H.btn(t("pr_sync"), { icon: "refresh", small: true, variant: "primary", onclick: async () => {
-          try { const out = await H.api("/api/paperread/sync", { body: {} }); H.toast(out.proposal ? t("pr_synced") : t("pr_uptodate"), "ok", out.proposal ? { label: t("inbox"), fn: H.openInbox } : null); loadPr(); }
+          try {
+            const out = await H.api("/api/paperread/sync", { body: {} });
+            const extra = out.skipped && out.skipped.length ? " · " + t("pr_skipped", { n: out.skipped.length }) : "";
+            H.toast((out.proposal ? t("pr_synced") : t("pr_uptodate")) + extra, "ok", out.proposal ? { label: t("inbox"), fn: H.openInbox } : null); loadPr();
+          }
           catch (e) { H.toast(e.message, "error"); }
         } }))), H.btn(t("scan"), { icon: "refresh", iconOnly: true, small: true, variant: "ghost", onclick: loadPr }));
   }
