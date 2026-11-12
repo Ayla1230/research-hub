@@ -65,6 +65,16 @@ Choose Google Gemini (free tier), Groq, OpenRouter free models, a local Ollama, 
 
 **Today's usage** in the Integration hub shows requests and tokens per source and for the AI, the limits, and the time until reset. Limits are set in Settings; when one is reached, that source stops for the day and resets at local midnight.
 
+## Research model from your own writing
+
+In **Research core → Research model**, choose **From my writing** and paste or upload your draft (`.docx`, `.txt`, `.md`, `.tex`):
+
+- **Rule-based reading (free, offline)** finds hypothesis sentences in Chinese or English, such as "H1: Perceived usefulness positively affects behavioral intention", "Trust moderates the relationship between X and Y" or "Attitude mediates …", and works out X, Y, mediators and moderators.
+- **AI reading (optional)** is more accurate when the draft has no explicit hypothesis sentences; it counts toward today's quota.
+- **Review before applying**: a preview diagram, the variables (symbol, name and role are editable; names that match existing variables reuse them) and every path can be unticked; nothing is saved until **Apply to research core**.
+- **The research model** is drawn from the hypothesis paths: labels and direction on each line, negative paths dashed red, moderators pointing at the path they moderate, and paths that skip a column routed above the boxes. Paths can also be added by hand.
+- **Download SVG** gives a clean vector figure (no paper counts or RQ markers) for the thesis or slides.
+
 ## Agents and MCP
 
 Research Hub ships an MCP server (stdio, standard library). Get a ready-made command, including the agent token, from **Integration hub → MCP tools & agents → Show command**. For Claude Code:

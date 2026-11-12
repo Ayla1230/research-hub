@@ -237,9 +237,10 @@
     };
     const name = (entity, id) => {
       if (typeof id === "string" && id.startsWith("$")) return refTitle(id);
-      const list = { stage: s.stages, task: s.tasks, rq: s.rqs, variable: s.variables, paper: s.papers, resource: s.resources }[entity] || [];
+      const list = { stage: s.stages, task: s.tasks, rq: s.rqs, variable: s.variables, paper: s.papers, resource: s.resources, relation: s.relations || [] }[entity] || [];
       const it = typeof id === "number" ? H.by(list, id) : null;
       if (!it) return typeof id === "string" ? id : `#${id}`;
+      if (entity === "relation") { const a = H.by(s.variables, it.source_id), b = H.by(s.variables, it.target_id); return `${it.label ? it.label + " " : ""}${a ? a.symbol : "?"} → ${b ? b.symbol : "?"}`; }
       return entity === "stage" ? H.stageTitle(it) : it.title || (it.symbol ? `${it.symbol} ${H.varName(it)}` : "") || it.code || it.name || `#${id}`;
     };
     if (op.op === "link" || op.op === "unlink") {

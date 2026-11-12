@@ -539,3 +539,217 @@ def default_query(stage: dict, note: str, context: dict) -> str:
     if not words and context.get("title"):
         words = [w for w in re.findall(r"[A-Za-z][A-Za-z\-]{2,}", context["title"]) if w.casefold() != "research"]
     return " ".join(dict.fromkeys(words))[:200] or (stage.get("title_en") or "")
+
+
+# ---------------------------------------------------------------- research model from the user's own writing
+def read_document(data: bytes, name: str) -> str:
+    """Plain text from an uploaded draft: .docx, .txt, .md, .tex (and similar text files)."""
+    ext = Path(name or "").suffix.lower()
+    if ext == ".docx":
+        import html
+        import io
+        import zipfile
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                xml = z.read("word/document.xml").decode("utf-8", errors="replace")
+        except (zipfile.BadZipFile, KeyError):
+            raise ValueError("could not read this .docx file") from None
+        xml = re.sub(r"</w:p>|<w:br[^>]*/>|<w:tab[^>]*/>", "\n", xml)
+        return html.unescape(re.sub(r"<[^>]+>", "", xml))[:400_000]
+    if ext in (".pdf", ".doc", ".pages", ".odt"):
+        raise ValueError(f"{ext} is not supported — save it as .docx or paste the text")
+    for enc in ("utf-8", "cp950", "big5", "utf-16"):
+        try:
+            return data.decode(enc)[:400_000]
+        except UnicodeDecodeError:
+            continue
+    raise ValueError("could not read the text of this file")
+
+
+_CJK = re.compile(r"[㐀-鿿]")
+_LABEL = re.compile(r"^\s*(?:(?:研究)?假設\s*([一二三四五六七八九十]+|\d+)\s*([a-zA-Z]?)|H\s*(\d+)\s*([a-zA-Z]?))\s*[:：.、)）]?\s*", re.I)
+_ZH_NUM = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+_SIGN = {"positive": "+", "positively": "+", "正向": "+", "正面": "+", "negative": "-", "negatively": "-", "負向": "-", "負面": "-"}
+_V = r"(?P<{0}>[^，,。；;：:]{{1,60}}?)"
+_VE = r"(?P<{0}>[^，,。；;：:]{{1,60}})$"  # a variable that ends the sentence: take all of it
+_VG = r"(?P<{0}>[^，,。；;：:]{{1,60}})"  # greedy: split at the LAST verb, so names may contain 影響
+_REL_EN = r"(?:positive\s+|negative\s+|significant\s+)?(?:relationship|relation|effect|association|link|impact|influence)s?"
+_PATTERNS = [
+    # mediation / moderation first: they also contain effect words
+    ("mediates", re.compile(_V.format("m") + r"\s+(?:significantly\s+|partially\s+|fully\s+)?mediates?\s+the\s+" + _REL_EN + r"\s+(?:between|of)\s+" + _V.format("x") + r"\s+(?:and|on|with)\s+" + _V.format("y") + r"\s*$", re.I)),
+    ("moderates", re.compile(_V.format("z") + r"\s+(?:significantly\s+|positively\s+|negatively\s+)?(?:moderates?|strengthens|weakens)\s+the\s+" + _REL_EN + r"\s+(?:between|of)\s+" + _V.format("x") + r"\s+(?:and|on|with)\s+" + _V.format("y") + r"\s*$", re.I)),
+    ("mediates", re.compile(_V.format("m") + r"(?:在|於)" + _V.format("x") + r"(?:對|與|和)" + _V.format("y") + r"(?:之間|間)?(?:的)?(?:關係|影響|關聯)?(?:中)?(?:具有|有|扮演|存在|具)?(?:顯著|部分|完全)?(?:的)?中介")),
+    ("moderates", re.compile(_V.format("z") + r"(?:在|於)" + _V.format("x") + r"(?:對|與|和)" + _V.format("y") + r"(?:之間|間)?(?:的)?(?:關係|影響|關聯)?(?:中)?(?:具有|有|扮演|存在|具)?(?:顯著)?(?:的)?(?:正向|負向)?(?:調節|干擾)")),
+    ("moderates", re.compile(_V.format("z") + r"(?:會|將|能)?(?:顯著)?(?:正向|負向)?(?:調節|干擾)(?:了)?" + _V.format("x") + r"(?:對|與|和)" + _V.format("y") + r"(?:之間)?(?:的)?(?:關係|影響|效果|關聯)")),
+    ("mediates", re.compile(_V.format("m") + r"(?:會|將|能)?(?:中介)(?:了)?" + _V.format("x") + r"(?:對|與|和)" + _V.format("y") + r"(?:之間)?(?:的)?(?:關係|影響|效果|關聯)")),
+    ("effect", re.compile(_V.format("x") + r"\s+(?:will\s+|would\s+|should\s+)?(?:has|have|had|exerts?|shows?)\s+(?:a\s+|an\s+)?(?:significant(?:ly)?\s+)?(?P<sign>positive|negative)?\s*(?:and\s+significant\s+)?(?:effect|influence|impact)s?\s+on\s+" + _V.format("y") + r"\s*$", re.I)),
+    ("effect", re.compile(_V.format("x") + r"\s+(?:will\s+|would\s+|should\s+)?(?:is\s+|are\s+)?(?P<sign>positively|negatively)?\s*(?:and\s+)?(?:significantly\s+)?(?:affects?|influences?|predicts?|impacts?|increases?|decreases?|reduces?|(?:related|associated)\s+(?:to|with))\s+" + _V.format("y") + r"\s*$", re.I)),
+    ("effect", re.compile(_V.format("x") + r"(?:會|將|能|可)?(?:對|與)" + _V.format("y") + r"(?:有|具有|呈|產生|具|存在)?(?:顯著)?(?:的)?(?P<sign>正向|負向|正面|負面)?(?:且)?(?:顯著)?(?:的)?(?:影響|效果|關聯|相關)")),
+    ("effect", re.compile(_VG.format("x") + r"(?:會|將|能|可)?(?:顯著)?(?:地)?(?P<sign>正向|負向|正面|負面)(?:且顯著)?(?:地)?(?:影響|預測)" + _VE.format("y"))),
+    ("effect", re.compile(_VG.format("x") + r"(?:影響|預測)" + _VE.format("y"))),
+]
+_TRIM = re.compile(r"^(?:(?:the|a|an)\s+|本研究|研究|假設|則|而|且|即)|(?:\s+(?:will|would|is|are|can)|會|將|的|之|了|顯著|地)$", re.I)
+
+
+def _clean_var(name: str) -> str:
+    name = re.sub(r"[\s　]+", " ", name or "").strip(" \t\"'“”「」『』()（）.。、")
+    for _ in range(3):
+        name = _TRIM.sub("", name).strip(" .。、")
+    return name[:60]
+
+
+def _sentences(text: str) -> list[str]:
+    parts = re.split(r"(?<=[。；;！？!?])|\n+|(?<=\.)\s+(?=[A-Z(\[]|H\d)", text or "")
+    return [p.strip() for p in parts if p and 4 <= len(p.strip()) <= 400]
+
+
+def _label(sentence: str) -> tuple[str, str]:
+    m = _LABEL.match(sentence)
+    if not m:
+        return "", sentence
+    if m.group(1):
+        num = m.group(1)
+        num = str(_ZH_NUM.get(num, num)) if not num.isdigit() else num
+        label = f"H{num}{(m.group(2) or '').lower()}"
+    else:
+        label = f"H{m.group(3)}{(m.group(4) or '').lower()}"
+    return label, sentence[m.end():]
+
+
+def extract_framework_rules(text: str) -> dict:
+    """Find hypothesised paths in the user's own writing without any AI: sentences like
+    "H1: Perceived usefulness positively affects intention", "知覺易用性對使用意圖有正向影響",
+    "信任調節知覺有用性與使用意圖之間的關係", "Attitude mediates the relationship between X and Y"."""
+    raw_vars: dict[str, dict] = {}
+    relations: list[dict] = []
+    matched: list[str] = []
+
+    def var(name: str, role_hint: str = "") -> str | None:
+        name = _clean_var(name)
+        if not name or len(name) > 60:
+            return None
+        key = re.sub(r"\s+", "", name).casefold()
+        v = raw_vars.setdefault(key, {"key": key, "name": name, "hint": "", "src": 0, "dst": 0})
+        if role_hint and not v["hint"]:
+            v["hint"] = role_hint
+        return key
+
+    def effect(x, y, sign="", label="") -> int | None:
+        if not x or not y or x == y:
+            return None
+        for i, r in enumerate(relations):
+            if r["kind"] == "effect" and r["source"] == x and r["target"] == y:
+                if label and not r["label"]:
+                    r["label"] = label
+                if sign and not r["sign"]:
+                    r["sign"] = sign
+                return i
+        relations.append({"source": x, "target": y, "kind": "effect", "sign": sign, "label": label, "moderates": None})
+        raw_vars[x]["src"] += 1
+        raw_vars[y]["dst"] += 1
+        return len(relations) - 1
+
+    for sentence in _sentences(text):
+        label, body = _label(sentence)
+        body = body.strip().rstrip("。.;；")
+        for kind, pattern in _PATTERNS:
+            m = pattern.search(body)
+            if not m:
+                continue
+            g = m.groupdict()
+            sign = _SIGN.get((g.get("sign") or "").lower(), "")
+            if not sign and re.search(r"正向|positive|strengthen", body, re.I):
+                sign = "+"
+            elif not sign and re.search(r"負向|negative|weaken", body, re.I):
+                sign = "-"
+            if kind == "effect":
+                ok = effect(var(g["x"]), var(g["y"]), sign, label) is not None
+            elif kind == "mediates":
+                x, med, y = var(g["x"]), var(g["m"], "med"), var(g["y"])
+                ok = bool(x and med and y) and effect(x, med, "", label) is not None and effect(med, y, "", label) is not None
+            else:
+                x, z, y = var(g["x"]), var(g["z"], "mod"), var(g["y"])
+                base = effect(x, y) if x and y else None
+                ok = base is not None and z is not None and z not in (x, y)
+                if ok:
+                    relations.append({"source": z, "target": y, "kind": "moderates", "sign": sign, "label": label, "moderates": base})
+            if ok:
+                matched.append(sentence[:300])
+                break
+    return _finish_framework(raw_vars, relations, matched, "rules")
+
+
+def _finish_framework(raw_vars: dict, relations: list[dict], matched: list[str], method: str) -> dict:
+    """Assign roles (X sources, Y outcomes, M in between, Z moderators) and symbols."""
+    counters = {"iv": "X", "dv": "Y", "med": "M", "mod": "Z", "ctrl": "C", "other": "V"}
+    used: dict[str, int] = {}
+    out_vars = []
+    for v in raw_vars.values():
+        role = v.get("role") or v.get("hint") or ""
+        if role not in counters:
+            role = "med" if v["src"] and v["dst"] else "iv" if v["src"] else "dv" if v["dst"] else "other"
+        if role in ("iv", "dv") and v["src"] and v["dst"] and not v.get("role"):
+            role = "med"
+        used[role] = used.get(role, 0) + 1
+        name = v["name"]
+        cjk = bool(_CJK.search(name))
+        out_vars.append({"key": v["key"], "symbol": f"{counters[role]}{used[role]}", "role": role,
+                         "name_zh": v.get("name_zh") or (name if cjk else ""), "name_en": v.get("name_en") or ("" if cjk else name),
+                         "definition": v.get("definition", "")})
+    order = {"iv": 0, "med": 1, "mod": 2, "dv": 3, "ctrl": 4, "other": 5}
+    out_vars.sort(key=lambda v: (order[v["role"]], v["symbol"]))
+    return {"variables": out_vars, "relations": relations, "sentences": matched, "method": method}
+
+
+def framework_prompt(text: str) -> tuple[str, str]:
+    system = ("You read a graduate student's own draft (any language) and extract its research model. Reply with ONE JSON object only: "
+              "{\"variables\": [{\"key\": short id, \"role\": \"iv|dv|med|mod|ctrl\", \"name_zh\": Chinese name or \"\", "
+              "\"name_en\": English name or \"\", \"definition\": one short sentence or \"\"}], "
+              "\"relations\": [{\"source\": key, \"target\": key, \"kind\": \"effect\" or \"moderates\", \"sign\": \"+\", \"-\" or \"\", "
+              "\"label\": hypothesis label like \"H1\" or \"\", \"moderates_source\": key, \"moderates_target\": key}]}. "
+              "For a moderator, give kind \"moderates\" with source = the moderator and moderates_source/moderates_target = the path it moderates. "
+              "For a mediator, give the two effect paths through it. Use only variables the text actually names; never invent hypotheses.")
+    return system, "Draft:\n" + text[:20000]
+
+
+def normalize_framework(raw: dict, method: str = "ai") -> dict:
+    """Make an AI answer safe and shaped like the rule-based result."""
+    raw_vars: dict[str, dict] = {}
+    for v in (raw.get("variables") or [])[:40]:
+        if not isinstance(v, dict):
+            continue
+        key = str(v.get("key") or v.get("name_en") or v.get("name_zh") or "").strip()[:60]
+        name_zh, name_en = _clean_var(str(v.get("name_zh") or "")), _clean_var(str(v.get("name_en") or ""))
+        if not key or not (name_zh or name_en):
+            continue
+        role = str(v.get("role") or "").lower()
+        raw_vars[key] = {"key": key, "name": name_zh or name_en, "name_zh": name_zh, "name_en": name_en,
+                         "role": role if role in ("iv", "dv", "med", "mod", "ctrl") else "", "hint": "",
+                         "definition": str(v.get("definition") or "")[:500], "src": 0, "dst": 0}
+    relations: list[dict] = []
+    pending_mod = []
+    for r in (raw.get("relations") or [])[:80]:
+        if not isinstance(r, dict):
+            continue
+        s, t = str(r.get("source") or ""), str(r.get("target") or "")
+        kind = "moderates" if str(r.get("kind")) == "moderates" else "effect"
+        sign = r.get("sign") if r.get("sign") in ("+", "-") else ""
+        label = str(r.get("label") or "")[:12]
+        if kind == "moderates":
+            pending_mod.append((s, str(r.get("moderates_source") or ""), str(r.get("moderates_target") or t), sign, label))
+            continue
+        if s in raw_vars and t in raw_vars and s != t:
+            relations.append({"source": s, "target": t, "kind": "effect", "sign": sign, "label": label, "moderates": None})
+            raw_vars[s]["src"] += 1
+            raw_vars[t]["dst"] += 1
+    for z, x, y, sign, label in pending_mod:
+        if z not in raw_vars:
+            continue
+        base = next((i for i, r in enumerate(relations) if r["source"] == x and r["target"] == y), None)
+        if base is None and x in raw_vars and y in raw_vars and x != y:
+            relations.append({"source": x, "target": y, "kind": "effect", "sign": "", "label": "", "moderates": None})
+            base = len(relations) - 1
+        if base is not None:
+            relations.append({"source": z, "target": relations[base]["target"], "kind": "moderates", "sign": sign, "label": label, "moderates": base})
+            raw_vars[z]["role"] = raw_vars[z]["role"] or "mod"
+    return _finish_framework(raw_vars, relations, [], method)

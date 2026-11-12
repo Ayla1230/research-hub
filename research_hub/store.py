@@ -28,6 +28,8 @@ PAPER_STATUS = ("candidate", "to_read", "reading", "done", "excluded")
 RESOURCE_KINDS = ("database", "folder", "mcp", "code", "link")
 REMOVED_SETTINGS = ("paperread_url", "paperread_library")
 MODULES = ("", "literature", "rq", "variables", "code", "writing")
+RELATION_KINDS = ("effect", "moderates")
+SIGNS = ("", "+", "-")
 EVIDENCE = ("", "supports", "contradicts", "mixed", "defines", "measures", "mentions")
 
 # Field specs: name -> (type, extra). Types: str, text, int, bool, enum, ref, json
@@ -80,6 +82,15 @@ ENTITIES: dict[str, dict] = {
             "openalex_id": ("str", None),
         },
         "required": ("title",),
+    },
+    "relation": {  # a hypothesised path in the research model, e.g. H1: X1 → Y1 (+)
+        "table": "relations",
+        "fields": {
+            "source_id": ("ref", "variable"), "target_id": ("ref", "variable"),
+            "kind": ("enum", RELATION_KINDS), "moderates_id": ("ref?", "relation"),
+            "sign": ("enum", SIGNS), "label": ("str", None), "note": ("text", None), "position": ("int", None),
+        },
+        "required": ("source_id", "target_id"),
     },
     "resource": {
         "table": "resources",
@@ -197,6 +208,13 @@ CREATE TABLE IF NOT EXISTS updates (
   id INTEGER PRIMARY KEY, stage_id INTEGER REFERENCES stages(id) ON DELETE SET NULL, note TEXT NOT NULL DEFAULT '',
   progress_before INTEGER NOT NULL DEFAULT 0, progress_after INTEGER NOT NULL DEFAULT 0, files TEXT NOT NULL DEFAULT '',
   source TEXT NOT NULL DEFAULT 'user', created TEXT NOT NULL, updated TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS relations (
+  id INTEGER PRIMARY KEY, source_id INTEGER NOT NULL REFERENCES variables(id) ON DELETE CASCADE,
+  target_id INTEGER NOT NULL REFERENCES variables(id) ON DELETE CASCADE, kind TEXT NOT NULL DEFAULT 'effect',
+  moderates_id INTEGER REFERENCES relations(id) ON DELETE SET NULL, sign TEXT NOT NULL DEFAULT '',
+  label TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0,
+  created TEXT NOT NULL, updated TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS usage (
   day TEXT NOT NULL, provider TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0,
@@ -418,6 +436,7 @@ class Store:
                 "tasks": rows("SELECT * FROM tasks ORDER BY stage_id, done, position, id"),
                 "rqs": rows("SELECT * FROM rqs ORDER BY position, id"),
                 "variables": rows("SELECT * FROM variables ORDER BY position, id"),
+                "relations": rows("SELECT * FROM relations ORDER BY position, id"),
                 "papers": rows("SELECT * FROM papers ORDER BY updated DESC, id DESC"),
                 "resources": rows("SELECT * FROM resources ORDER BY kind, position, id"),
                 "files": rows("SELECT * FROM files ORDER BY created DESC, id DESC"),
@@ -590,6 +609,10 @@ class Store:
                 clean["position"] = (db.execute(f"SELECT COALESCE(MAX(position), -1) + 1 FROM {table}").fetchone()[0])
             if entity == "variable" and "role" not in clean:
                 clean["role"] = "iv"
+            if entity == "relation":
+                clean.setdefault("kind", "effect")
+                if clean["source_id"] == clean["target_id"]:
+                    raise ValidationError("a relation needs two different variables")
             if entity == "stage" and not clean.get("title_en"):
                 clean["title_en"] = clean["title_zh"]
             cols = list(clean) + ["created", "updated"]

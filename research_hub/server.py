@@ -538,6 +538,8 @@ def make_handler(app: App):
                                         "done_task_ids": [i for i in out.get("done_task_ids") or [] if isinstance(i, int) and i in ids],
                                         "query": str(out.get("query") or "")[:200], "summary": str(out.get("summary") or "")[:500],
                                         "tokens": tokens})
+            if path == "/api/framework/extract":
+                return self._json(200, self._framework(qs))
             if path == "/api/checkin":
                 return self._json(200, self._checkin(self._payload()))
             if path == "/api/watch/scan":
@@ -579,6 +581,54 @@ def make_handler(app: App):
                     raise ValidationError(f"cannot open the file manager here: {e}") from None
                 return self._json(200, {"ok": True})
             return self._error(404, "not found")
+
+        # ---------------------------------------------------------- research model from the user's writing
+        def _framework(self, qs: dict) -> dict:
+            """Read the user's own draft (pasted text or an uploaded .docx/.txt/.md/.tex) and
+            propose a research model. Nothing is saved: the dashboard shows the result for
+            review and the user applies what they keep."""
+            use_ai = (qs.get("ai") or ["0"])[0] == "1"
+            filename = unquote(self.headers.get("X-Filename", "")).strip()
+            if filename:
+                try:
+                    text = integ.read_document(self._body(), filename)
+                except ValueError as e:
+                    raise ValidationError(str(e)) from None
+            else:
+                data = self._payload()
+                text = str(data.get("text") or "")
+                use_ai = use_ai or bool(data.get("ai"))
+            text = text.strip()
+            if len(text) < 10:
+                raise ValidationError("the text is too short to find a research model")
+            if use_ai:
+                cfg = integ.ai_config(store.settings())
+                if not cfg:
+                    raise ValidationError("AI assistant is not set up — choose a provider and key in Settings")
+                store.take_quota("ai")
+                system, user = integ.framework_prompt(text)
+                try:
+                    reply, tokens = integ.ai_chat(cfg, system, user, timeout=120)
+                except Exception as e:
+                    raise ValidationError(f"AI service unavailable: {e}") from None
+                store.add_tokens("ai", tokens)
+                result = integ.normalize_framework(integ.parse_json_block(reply), "ai")
+                result["tokens"] = tokens
+            else:
+                result = integ.extract_framework_rules(text)
+            existing = {}
+            for v in store.snapshot()["variables"]:
+                for name in (v["name_zh"], v["name_en"]):
+                    if name:
+                        existing[re.sub(r"\s+", "", name).casefold()] = v["id"]
+            for v in result["variables"]:
+                for name in (v["name_zh"], v["name_en"]):
+                    key = re.sub(r"\s+", "", name or "").casefold()
+                    if key and key in existing:
+                        v["existing_id"] = existing[key]
+                        break
+            result["chars"] = len(text)
+            return result
 
         # ---------------------------------------------------------- check-in
         def _checkin(self, data: dict) -> dict:

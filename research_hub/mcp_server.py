@@ -27,7 +27,7 @@ OP_SCHEMA = {
     "description": (
         "One change. create: {op:'create', entity, data, ref?}; update: {op:'update', entity, id | match:{key:value}, data, append?:{textField: text}}; "
         "delete: {op:'delete', entity, id}; link/unlink: {op:'link', link:'rq_variable'|'rq_paper'|'variable_paper', a, b, data?}. "
-        "Entities: stage, task, rq, variable, paper, resource. Use \"$ref\" to point at an object created earlier in the same batch. "
+        "Entities: stage, task, rq, variable, relation (hypothesised path: source_id, target_id, kind effect|moderates, moderates_id, sign +|-, label e.g. H1), paper, resource. Use \"$ref\" to point at an object created earlier in the same batch. "
         "Call get_schema for field names and allowed values."
     ),
 }
@@ -39,7 +39,7 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "list_items", "description": "List items of one kind, optionally filtered by a case-insensitive text query.",
      "inputSchema": {"type": "object", "properties": {
-         "kind": {"type": "string", "enum": ["stages", "tasks", "rqs", "variables", "papers", "resources", "files", "variable_papers", "rq_variables", "rq_papers"]},
+         "kind": {"type": "string", "enum": ["stages", "tasks", "rqs", "variables", "relations", "papers", "resources", "files", "variable_papers", "rq_variables", "rq_papers"]},
          "query": {"type": "string"}, "limit": {"type": "integer", "default": 50}}, "required": ["kind"]}},
     {"name": "propose_changes", "description": "Submit a batch of changes for the user to review. Nothing is applied until the user approves it in the dashboard.",
      "inputSchema": {"type": "object", "properties": {

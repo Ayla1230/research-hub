@@ -347,12 +347,12 @@
   }
 
   /* ================= Model (SVG) ================= */
-  function modelView() {
+  /* Role-based sketch used until explicit hypothesis paths exist. */
+  function roleModelSvg() {
     const vars = H.state.variables;
     const by = (r) => vars.filter((v) => v.role === r);
     const X = by("iv"), Y = by("dv"), M = by("med"), Z = by("mod"), C = by("ctrl");
-    if (!X.length || !Y.length) return el("div.empty-state", null, H.icon("layers", 22), el("p", null, t("model_empty")),
-      H.btn(t("add_variable"), { icon: "plus", variant: "primary", onclick: () => H.editVariable(null, X.length ? "dv" : "iv") }));
+    if (!X.length || !Y.length) return null;
     const ns = "http://www.w3.org/2000/svg";
     const mk = (tag, attrs, text) => { const n = document.createElementNS(ns, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (text != null) n.textContent = text; return n; };
     const W = 960, boxW = 200, boxH = 56, gap = 18;
@@ -422,8 +422,28 @@
       nodes.append(g);
     }
     svg.append(nodes);
-    return el("div", null, el("p.hint-line", null, t("model_hint")), el("div.model-wrap", null, svg),
-      el("div.legend", null, ["iv", "med", "mod", "dv", "ctrl"].map((r) => el("span.legend-item", null, el("i.sw.role-" + r), roleLabel(r)))));
+    return svg;
+  }
+
+  function modelView() {
+    const rels = H.state.relations || [];
+    const svg = rels.length ? H.pathModelSvg(H.state.variables, rels, { interactive: true }) : roleModelSvg();
+    const tools = el("div.toolbar.wrap", null,
+      el("p.hint-line.grow", null, rels.length ? t("model_hint_paths") : t("model_hint")),
+      el("div.tool-group", null,
+        H.btn(t("fw_from_text"), { icon: "sparkle", variant: "primary", small: true, onclick: () => H.openFramework() }),
+        H.btn(t("fw_add_rel"), { icon: "plus", variant: "ghost", small: true, disabled: H.state.variables.length < 2, onclick: () => H.editRelation(null) }),
+        // the download is a clean figure for the thesis: no paper-count badges or RQ markers
+        svg ? H.btn(t("fw_download"), { icon: "download", variant: "ghost", small: true, onclick: () =>
+          H.downloadSvg(rels.length ? H.pathModelSvg(H.state.variables, rels, { idSuffix: "-dl" }) : svg, "research-model.svg") }) : null));
+    if (!svg) return el("div", null, tools, el("div.empty-state", null, H.icon("layers", 22), el("p", null, t("model_empty_text")),
+      el("div.toolbar", null, H.btn(t("fw_from_text"), { icon: "sparkle", variant: "primary", onclick: () => H.openFramework() }),
+        H.btn(t("add_variable"), { icon: "plus", variant: "ghost", onclick: () => H.editVariable(null, "iv") }))));
+    return el("div", null, tools, el("div.model-wrap", null, svg),
+      el("div.legend", null, ["iv", "med", "mod", "dv", "ctrl"].map((r) => el("span.legend-item", null, el("i.sw.role-" + r), roleLabel(r))),
+        rels.length ? [el("span.legend-item", null, el("i.ln.pos"), t("fw_sign_pos")), el("span.legend-item", null, el("i.ln.neg"), t("fw_sign_neg")),
+          el("span.legend-item", null, el("i.ln.modl"), t("fw_kind_moderates"))] : null),
+      rels.length ? H.relationList() : null);
   }
 
   /* ================= section + modules ================= */

@@ -298,6 +298,97 @@ class TrackingTests(unittest.TestCase):
         self.assertIn("Perceived usefulness", q)
 
 
+class FrameworkTests(unittest.TestCase):
+    ZH = ("研究假設如下：\nH1：知覺有用性對使用意圖有正向影響。\nH2：知覺易用性正向影響知覺有用性。\n"
+          "H3：信任調節知覺有用性與使用意圖之間的關係。\nH4：使用態度在知覺有用性與使用意圖之間具有中介效果。\n"
+          "假設五：社會影響會顯著影響使用意圖。\n本研究以問卷調查法進行。")
+    EN = ("H1: Perceived usefulness positively affects behavioral intention. H2: Perceived ease of use has a positive effect on "
+          "perceived usefulness. H3: Trust moderates the relationship between perceived usefulness and behavioral intention. "
+          "H4: Attitude mediates the relationship between perceived ease of use and behavioral intention. "
+          "H5a: The amount of training is negatively associated with anxiety.")
+
+    def names(self, result):
+        return {v["name_zh"] or v["name_en"]: v for v in result["variables"]}
+
+    def test_rules_chinese(self):
+        r = integ.extract_framework_rules(self.ZH)
+        names = self.names(r)
+        self.assertEqual(set(names), {"知覺有用性", "知覺易用性", "信任", "使用態度", "使用意圖", "社會影響"})
+        self.assertEqual(names["信任"]["role"], "mod")
+        self.assertEqual(names["使用態度"]["role"], "med")
+        self.assertEqual(names["使用意圖"]["role"], "dv")
+        self.assertEqual(names["知覺易用性"]["role"], "iv")
+        labels = {(x["source"], x["target"], x["kind"]): (x["label"], x["sign"]) for x in r["relations"]}
+        self.assertEqual(labels[("知覺有用性", "使用意圖", "effect")], ("H1", "+"))
+        self.assertEqual(labels[("社會影響", "使用意圖", "effect")][0], "H5")
+        mod = next(x for x in r["relations"] if x["kind"] == "moderates")
+        base = r["relations"][mod["moderates"]]
+        self.assertEqual((mod["source"], base["source"], base["target"]), ("信任", "知覺有用性", "使用意圖"))
+        self.assertEqual(len(r["sentences"]), 5)  # the method sentence is ignored
+
+    def test_rules_english(self):
+        r = integ.extract_framework_rules(self.EN)
+        names = self.names(r)
+        self.assertIn("Attitude", names)
+        self.assertIn("amount of training", names)
+        neg = next(x for x in r["relations"] if x["label"] == "H5a")
+        self.assertEqual(neg["sign"], "-")
+        self.assertEqual(names["Trust"]["role"], "mod")
+
+    def test_rules_nothing(self):
+        self.assertEqual(integ.extract_framework_rules("今天天氣很好，我們去散步。")["variables"], [])
+
+    def test_read_docx(self):
+        import io
+        import zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("word/document.xml", '<w:document><w:body><w:p><w:r><w:t>H1：系統品質會影響滿意度</w:t></w:r></w:p>'
+                                            '<w:p><w:r><w:t>H2: A &amp; B affects C</w:t></w:r></w:p></w:body></w:document>')
+        text = integ.read_document(buf.getvalue(), "draft.docx")
+        self.assertIn("H1：系統品質會影響滿意度\n", text)
+        self.assertIn("A & B", text)
+        with self.assertRaises(ValueError):
+            integ.read_document(b"%PDF", "x.pdf")
+        self.assertEqual(integ.read_document("中文".encode("cp950"), "a.txt"), "中文")
+
+    def test_normalize_ai(self):
+        raw = {"variables": [{"key": "pu", "role": "iv", "name_en": "Perceived usefulness"}, {"key": "bi", "role": "dv", "name_en": "Intention"},
+                             {"key": "tr", "role": "weird", "name_zh": "信任"}, {"key": "ghost"}],
+               "relations": [{"source": "pu", "target": "bi", "kind": "effect", "sign": "+", "label": "H1"},
+                             {"source": "tr", "kind": "moderates", "moderates_source": "pu", "moderates_target": "bi", "label": "H2"},
+                             {"source": "pu", "target": "nope"}]}
+        r = integ.normalize_framework(raw)
+        self.assertEqual(len(r["variables"]), 3)
+        self.assertEqual(len(r["relations"]), 2)
+        self.assertEqual(self.names(r)["信任"]["role"], "mod")
+        self.assertEqual(r["relations"][1]["moderates"], 0)
+
+    def test_relation_entity(self):
+        d = tempfile.mkdtemp()
+        try:
+            store = Store(Path(d))
+            res = store.apply_ops([
+                {"op": "create", "entity": "variable", "ref": "x", "data": {"symbol": "X1"}},
+                {"op": "create", "entity": "variable", "ref": "y", "data": {"symbol": "Y1", "role": "dv"}},
+                {"op": "create", "entity": "variable", "ref": "z", "data": {"symbol": "Z1", "role": "mod"}},
+                {"op": "create", "entity": "relation", "ref": "r", "data": {"source_id": "$x", "target_id": "$y", "sign": "+", "label": "H1"}},
+                {"op": "create", "entity": "relation", "data": {"source_id": "$z", "target_id": "$y", "kind": "moderates", "moderates_id": "$r"}},
+            ])
+            rels = store.snapshot()["relations"]
+            self.assertEqual([r["kind"] for r in rels], ["effect", "moderates"])
+            with self.assertRaises(ValidationError):
+                store.apply_ops([{"op": "create", "entity": "relation", "data": {"source_id": res[0]["id"], "target_id": res[0]["id"]}}])
+            with self.assertRaises(ValidationError):
+                store.apply_ops([{"op": "create", "entity": "relation", "data": {"source_id": res[0]["id"], "target_id": res[1]["id"], "sign": "?"}}])
+            store.apply_ops([{"op": "delete", "entity": "variable", "id": res[0]["id"]}])  # X1 gone: its path goes, the moderation stays unlinked
+            rels = store.snapshot()["relations"]
+            self.assertEqual(len(rels), 1)
+            self.assertIsNone(rels[0]["moderates_id"])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 class IntegrationTests(unittest.TestCase):
     def test_bibtex_roundtrip(self):
         bib = """@article{davis1989,
@@ -545,6 +636,21 @@ class ServerTests(unittest.TestCase):
             fake.shutdown()
             fake.server_close()
             self.store.save_settings({"ai_provider": "", "ai_api_key": ""})
+
+    def test_framework_endpoint(self):
+        code, body = self.req("/api/framework/extract", {"text": FrameworkTests.ZH})
+        self.assertEqual(code, 200, body)
+        out = json.loads(body)
+        self.assertEqual((out["method"], len(out["variables"])), ("rules", 6))
+        code, body = self.req("/api/framework/extract", raw=FrameworkTests.EN.encode(), headers={"X-Filename": "draft.md"})
+        self.assertEqual(json.loads(body)["method"], "rules")
+        self.assertEqual(self.req("/api/framework/extract", {"text": "short"})[0], 400)
+        self.assertEqual(self.req("/api/framework/extract", raw=b"%PDF-1.4", headers={"X-Filename": "a.pdf"})[0], 400)
+        self.assertEqual(self.req("/api/framework/extract?ai=1", {"text": FrameworkTests.ZH})[0], 400)  # AI not configured
+        self.store.apply_ops([{"op": "create", "entity": "variable", "data": {"symbol": "X9", "name_zh": "信任"}}])
+        out = json.loads(self.req("/api/framework/extract", {"text": FrameworkTests.ZH})[1])
+        trust = next(v for v in out["variables"] if v["name_zh"] == "信任")
+        self.assertTrue(trust.get("existing_id"))
 
     def test_script_run_disabled_by_default(self):
         code, body = self.req("/api/scripts/run", {"path": "/tmp/x.py"})

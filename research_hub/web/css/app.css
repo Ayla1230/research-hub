@@ -640,6 +640,39 @@ button.stat:hover { background: var(--bg-soft); }
   .oa-form { flex-wrap: wrap; }
 }
 
+
+/* ---------- v1.1: research model from writing ---------- */
+.hint-line.grow { flex: 1; margin: 0; }
+.model.paths .edge.path { stroke: #4a4f5c; stroke-width: 1.8; }
+.model.paths .edge.neg { stroke: var(--bad); stroke-dasharray: 6 4; }
+.model.paths .edge.modl { stroke: var(--r-mod); stroke-dasharray: 4 4; stroke-width: 1.6; }
+.model .arrowhead.neg { fill: var(--bad); }
+.model .arrowhead.modh { fill: var(--r-mod); }
+.model.paths .arrowhead { fill: #4a4f5c; }
+.model .lbl-bg { fill: #fff; stroke: var(--line-2); stroke-width: 1; }
+.model .lbl { font: 600 11px var(--mono); fill: var(--ink-2); }
+.model .lbl.neg { fill: var(--bad); }
+.model .lbl.modl { fill: var(--r-mod); }
+.legend .ln { width: 18px; height: 0; border-top: 2px solid #4a4f5c; display: inline-block; }
+.legend .ln.neg { border-top: 2px dashed var(--bad); }
+.legend .ln.modl { border-top: 2px dashed var(--r-mod); }
+.rel-list-wrap { margin-top: 18px; }
+.rel-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.rel-list li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 9px; font-size: 13.5px; }
+.rel-list li:hover { background: var(--bg-soft); }
+.rel-label { min-width: 40px; font-size: 12px; font-weight: 600; color: var(--ink); background: var(--bg-sunk); border-radius: 6px; padding: 1px 7px; text-align: center; }
+.rel-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fw-out { display: grid; gap: 12px; }
+.fw-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fw-preview { max-height: 380px; }
+.fw-preview .model { min-width: 640px; }
+.fw-table-wrap { overflow-x: auto; }
+.fw-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.fw-table th { text-align: left; font: 500 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); padding: 4px 6px; }
+.fw-table td { padding: 4px 6px; border-top: 1px solid var(--line); vertical-align: middle; }
+.fw-table .sym-in { width: 64px; font-family: var(--mono); }
+.fw textarea { font-size: 14px; }
+
 /* ---------- responsive ---------- */
 @media (max-width: 1080px) {
   .jump { display: none; }
