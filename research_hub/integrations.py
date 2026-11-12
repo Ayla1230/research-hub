@@ -274,7 +274,7 @@ def openalex_search(query: str, *, year_from: int = 0, limit: int = 20, mailto: 
     if mailto:
         params["mailto"] = mailto
     url = "https://api.openalex.org/works?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers={"User-Agent": "research-hub/1.0", "Accept": "application/json"})
+    req = urllib.request.Request(url, headers={"User-Agent": "research-hub/1.2", "Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=20) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     out = []
@@ -387,7 +387,7 @@ def classify(names: list[str], stages: list[dict], rules: list[str] | None = Non
 
 # ---------------------------------------------------------------- more literature sources
 def _get_json(url: str, headers: dict | None = None, timeout: int = 20):
-    req = urllib.request.Request(url, headers={"User-Agent": "research-hub/1.1", "Accept": "application/json", **(headers or {})})
+    req = urllib.request.Request(url, headers={"User-Agent": "research-hub/1.2", "Accept": "application/json", **(headers or {})})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -490,7 +490,7 @@ def ai_chat(cfg: dict, system: str, user: str, *, timeout: int = 60) -> tuple[st
     """One chat completion against an OpenAI-compatible endpoint. Returns (text, tokens used)."""
     body = json.dumps({"model": cfg["model"], "temperature": 0.2,
                        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}).encode("utf-8")
-    headers = {"Content-Type": "application/json", "User-Agent": "research-hub/1.1"}
+    headers = {"Content-Type": "application/json", "User-Agent": "research-hub/1.2"}
     if cfg.get("key"):
         headers["Authorization"] = f"Bearer {cfg['key']}"
     req = urllib.request.Request(cfg["base_url"] + "/chat/completions", data=body, headers=headers, method="POST")
