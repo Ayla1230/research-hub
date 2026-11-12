@@ -87,7 +87,7 @@ The Design check tab follows Bono & McNamara (2011): five pre-submission design 
 
 A section of its own. **Questions from an uploaded paper**: drop a PDF, .docx or .txt; the hub detects the title, methods, labelled hypotheses and key terms and drafts essay questions with outlines — only the ones you tick are saved (tick AI for questions written from the text). PDFs are read best with Poppler's `pdftotext`; the built-in fallback only handles simple Latin-text PDFs.
 
-Folders for questions and readings, question prediction (rules or AI), question analysis with an answer outline, reading analysis from 5C notes, and timed essay practice graded by outline coverage (plus AI comments when available). A 16-question research-methods starter bank (in Chinese, original wording) is included.
+Folders for questions and readings, question prediction (rules or AI), question analysis with an answer outline, reading analysis from 5C notes, and timed essay practice graded by outline coverage (plus AI comments when available). Every hand-in is kept, so each question shows its score history; Weak spots ranks folders by average latest score; a spaced-review schedule (1→3→7→14→30→60 days, back to tomorrow after a weak answer) drives the Review today list for questions and papers. A 16-question research-methods starter bank (in Chinese, original wording) is included.
 
 ## Voice podcast
 

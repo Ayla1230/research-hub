@@ -927,3 +927,22 @@ body[data-section]:not([data-section="home"]) .band { padding-top: 32px; }
 .sidenav-item.on { background: var(--bg-sunk); color: var(--ink); font-weight: 600; }
 @media (prefers-reduced-motion: reduce) { .sidenav-panel { animation: none; } }
 @media (max-width: 900px) { .subnav-in { padding: 0 12px; } .crumb { padding-left: 8px; } }
+
+/* ---------- review queue + weak spots ---------- */
+.ex-today { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+.ex-queue { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; counter-reset: q; }
+.ex-queue li { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+.ex-queue.papers { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.ex-queue-q { border: 0; background: none; padding: 0; font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; color: var(--ink); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ex-queue-q:hover { color: var(--accent-ink); text-decoration: underline; }
+.ex-weak { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.ex-weak li { display: grid; grid-template-columns: minmax(90px, 140px) 1fr 32px 40px; gap: 10px; align-items: center; font-size: 13.5px; }
+.ex-weak-name { border: 0; background: none; padding: 0; font: inherit; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-weak-name:hover { text-decoration: underline; }
+.ex-weak .tp-track i.lo { background: var(--bad); } .ex-weak .tp-track i.mid { background: var(--warn); } .ex-weak .tp-track i.hi { background: var(--ok); }
+.ex-history { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0 0 6px; font-size: 12.5px; }
+.ex-history .lbl { color: var(--muted); }
+.ex-try { padding: 1px 7px; border-radius: 6px; font-size: 12px; background: var(--bg-sunk); }
+.ex-try.hi { background: var(--ok-soft); color: var(--ok); } .ex-try.mid { background: var(--warn-soft); color: var(--warn); } .ex-try.lo { background: var(--bad-soft); color: var(--bad); }
+.due { color: var(--warn) !important; font-weight: 600; }
+@media (max-width: 900px) { .ex-today { grid-template-columns: 1fr; } }

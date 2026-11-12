@@ -889,6 +889,27 @@ class TopicThesisTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             integ.read_pdf(b"%PDF-1.4 nothing here")
 
+    def test_attempts_and_review_schedule(self):
+        store = Store(Path(tempfile.mkdtemp()))
+        store.apply_ops([{"op": "create", "entity": "question", "ref": "q", "data": {"text": "題目", "folder": "CMV"}},
+                         {"op": "create", "entity": "attempt", "data": {"question_id": "$q", "score": 55, "coverage": 40, "answer": "a", "seconds": 600}},
+                         {"op": "create", "entity": "attempt", "data": {"question_id": "$q", "score": 85, "coverage": 90, "answer": "b"}},
+                         {"op": "create", "entity": "paper", "data": {"title": "P", "folder": "CMV", "review_date": "2026-11-20", "review_interval": 3}}])
+        snap = store.snapshot()
+        q = snap["questions"][0]
+        self.assertEqual([a["score"] for a in snap["attempts"]], [85, 55])  # newest first, answers not sent in the snapshot
+        self.assertNotIn("answer", snap["attempts"][0])
+        self.assertEqual((q["review_date"], q["review_interval"]), ("", 0))
+        store.apply_ops([{"op": "update", "entity": "question", "id": q["id"], "data": {"review_date": "2026-11-15", "review_interval": 3}}])
+        self.assertEqual(store.snapshot()["questions"][0]["review_date"], "2026-11-15")
+        self.assertEqual(snap["papers"][0]["review_interval"], 3)
+        with self.assertRaises(ValidationError):
+            store.apply_ops([{"op": "update", "entity": "question", "id": q["id"], "data": {"review_date": "soon"}}])
+        with self.assertRaises(ValidationError):
+            store.apply_ops([{"op": "create", "entity": "attempt", "data": {"question_id": 9999, "score": 10}}])
+        store.apply_ops([{"op": "delete", "entity": "question", "id": q["id"]}])
+        self.assertEqual(store.snapshot()["attempts"], [])
+
     def test_voice_rejects_empty_and_unknown(self):
         with self.assertRaises(voice.VoiceError):
             voice._clean("  ")

@@ -101,6 +101,7 @@ ENTITIES: dict[str, dict] = {
             "complication_type": ("enum", COMPLICATION_TYPES),
             "story_role": ("enum", ("",) + FIVE_C),  # which block of MY story this paper supports
             "folder": ("str", None),  # reading-notes folder, e.g. a course week or an exam topic
+            "review_date": ("date", None), "review_interval": ("int", (0, 365)),
         },
         "required": ("title",),
     },
@@ -130,8 +131,15 @@ ENTITIES: dict[str, dict] = {
             "outline": ("text", None), "answer": ("text", None), "minutes": ("int", (0, 600)),
             "score": ("int", (0, 100)), "status": ("enum", QUESTION_STATUS), "paper_id": ("int", None),
             "feedback": ("text", None), "position": ("int", None),
+            "review_date": ("date", None), "review_interval": ("int", (0, 365)),  # spaced review: next date, current gap in days
         },
         "required": ("text",),
+    },
+    "attempt": {  # one handed-in practice answer; kept so progress on a question can be seen over time
+        "table": "attempts",
+        "fields": {"question_id": ("ref", "question"), "answer": ("text", None), "score": ("int", (0, 100)), "coverage": ("int", (0, 100)),
+                   "feedback": ("text", None), "seconds": ("int", (0, 86400))},
+        "required": ("question_id",),
     },
     "story": {  # my own research story, one row per C (fixed: updated, never created or deleted)
         "table": "story",
@@ -289,6 +297,11 @@ CREATE TABLE IF NOT EXISTS questions (
   paper_id INTEGER NOT NULL DEFAULT 0, feedback TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0,
   created TEXT NOT NULL, updated TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS attempts (
+  id INTEGER PRIMARY KEY, question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE, answer TEXT NOT NULL DEFAULT '',
+  score INTEGER NOT NULL DEFAULT 0, coverage INTEGER NOT NULL DEFAULT 0, feedback TEXT NOT NULL DEFAULT '', seconds INTEGER NOT NULL DEFAULT 0,
+  created TEXT NOT NULL, updated TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS design (
   id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, purpose TEXT NOT NULL DEFAULT '', design TEXT NOT NULL DEFAULT '',
   waves INTEGER NOT NULL DEFAULT 0, sample TEXT NOT NULL DEFAULT '', limitations TEXT NOT NULL DEFAULT '',
@@ -381,6 +394,11 @@ class Store:
                     db.execute(f"ALTER TABLE papers ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
             if "folder" not in paper_cols:
                 db.execute("ALTER TABLE papers ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
+            for table in ("papers", "questions"):
+                have = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
+                if "review_date" not in have:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN review_date TEXT NOT NULL DEFAULT ''")
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN review_interval INTEGER NOT NULL DEFAULT 0")
             stamp = now()
             db.execute("INSERT OR IGNORE INTO topic (key, created, updated) VALUES ('main', ?, ?)", (stamp, stamp))
             for key in FIVE_C:
@@ -538,6 +556,7 @@ class Store:
                 "design": (rows("SELECT * FROM design WHERE key='main'") or [{}])[0],
                 "topic": (rows("SELECT * FROM topic WHERE key='main'") or [{}])[0],
                 "questions": rows("SELECT * FROM questions ORDER BY folder, position, id"),
+                "attempts": rows("SELECT id, question_id, score, coverage, seconds, created FROM attempts ORDER BY id DESC LIMIT 1000"),
                 "story": rows("SELECT * FROM story ORDER BY CASE key WHEN 'common' THEN 0 WHEN 'complication' THEN 1 "
                               "WHEN 'concern' THEN 2 WHEN 'course' THEN 3 ELSE 4 END"),
                 "papers": rows("SELECT * FROM papers ORDER BY updated DESC, id DESC"),

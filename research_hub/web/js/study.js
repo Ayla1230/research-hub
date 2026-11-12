@@ -99,6 +99,32 @@
   };
 
   /* ================= 2. exam practice ================= */
+  /* Spaced review: every pass doubles the gap, a weak answer brings the item back tomorrow. */
+  const today = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+  const addDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+  const STEPS = [1, 3, 7, 14, 30, 60];
+  const nextGap = (gap, score) => (score < 60 ? 1 : score < 80 ? Math.max(2, Math.min(gap || 2, 3)) : STEPS.find((x) => x > (gap || 0)) || 60);
+  const isDue = (x) => !!x.review_date && x.review_date <= today();
+  H.reviewQueue = function () {
+    const s = H.state;
+    const due = s.questions.filter(isDue).sort((a, b) => a.score - b.score || a.review_date.localeCompare(b.review_date));
+    const fresh = s.questions.filter((q) => q.status === "new" && !q.review_date);
+    return { questions: [...due, ...fresh].slice(0, 3), dueQuestions: due.length, papers: s.papers.filter(isDue).sort((a, b) => a.review_date.localeCompare(b.review_date)) };
+  };
+  /* Weak spots: per folder, the average of each practised question's latest score. */
+  H.examStats = function () {
+    const by = new Map();
+    for (const q of H.state.questions) {
+      const f = q.folder || "";
+      const g = by.get(f) || by.set(f, { folder: f, total: 0, done: 0, sum: 0, mastered: 0 }).get(f);
+      g.total += 1;
+      if (q.status !== "new") { g.done += 1; g.sum += q.score; }
+      if (q.status === "mastered") g.mastered += 1;
+    }
+    return [...by.values()].map((g) => ({ ...g, avg: g.done ? Math.round(g.sum / g.done) : null })).sort((a, b) => (a.avg ?? 101) - (b.avg ?? 101));
+  };
+  const reviewPaper = (p) => { const gap = STEPS.find((x) => x > (p.review_interval || 0)) || 60; return H.ops([{ op: "update", entity: "paper", id: p.id, data: { review_interval: gap, review_date: addDays(gap) } }]); };
+
   const KIND = { past: ["歷屆考題", "Past"], predicted: ["考題預測", "Predicted"], practice: ["自訂練習", "Practice"] };
   const DIFF = { "": ["—", "—"], easy: ["簡單", "Easy"], medium: ["中等", "Medium"], hard: ["難", "Hard"] };
   const QSTATUS = { new: ["未練習", "New"], practiced: ["已練習", "Practiced"], mastered: ["已掌握", "Mastered"] };
@@ -148,7 +174,12 @@
       clearInterval(timer); done = true;
       const text = [L(`涵蓋答題架構 ${r.coverage}%`, `Outline coverage ${r.coverage}%`), r.strengths ? L("優點：", "Strengths: ") + r.strengths : "", r.gaps ? L("不足：", "Gaps: ") + r.gaps : "",
         r.tip ? L("改寫建議：", "Tip: ") + r.tip : "", r.missed.length ? L("尚未寫到：", "Not covered: ") + r.missed.join("；") : ""].filter(Boolean).join("\n");
-      await H.api("/api/ops", { body: { ops: [{ op: "update", entity: "question", id: q.id, data: { answer: answer.value, score: r.score, feedback: text, status: r.score >= 80 ? "mastered" : "practiced" } }] } });
+      const gap = nextGap(q.review_interval, r.score);
+      await H.api("/api/ops", { body: { ops: [
+        { op: "update", entity: "question", id: q.id, data: { answer: answer.value, score: r.score, feedback: text, status: r.score >= 80 ? "mastered" : "practiced", review_interval: gap, review_date: addDays(gap) } },
+        { op: "create", entity: "attempt", data: { question_id: q.id, answer: answer.value, score: r.score, coverage: r.coverage, feedback: text, seconds: Math.max(0, total - left) } }] } });
+      q.review_interval = gap;
+      H.toast(L(`已記錄，${gap} 天後再複習`, `Recorded — review again in ${gap} day(s)`), "ok");
       H.put(feedback, el("div.ex-score", null, el("strong.mono", null, r.score), el("span", null, " / 100 · " + (r.method === "ai" ? "AI" : L("依答題架構關鍵詞比對", "outline keyword match")))),
         r.hit.length ? el("ul.ex-hit", null, r.hit.map((p) => el("li", null, H.icon("check", 13), p))) : null,
         r.missed.length ? el("ul.ex-miss", null, r.missed.map((p) => el("li", null, H.icon("alert", 13), p))) : null,
@@ -243,7 +274,9 @@
           H.btn(L("依此文獻出題", "Make a question"), { icon: "plus", small: true, variant: "ghost", onclick: () => H.editQuestion(null, { kind: "predicted", folder: p.folder || "", paper_id: p.id,
             text: L(`請說明「${p.title}」一文想解決的缺口、採取的研究方法與主要貢獻，並評論其研究設計的限制。`, `Explain the gap, method and contribution of “${p.title}”, and critique its design.`),
             outline: H.FIVE_C.map((c, i) => `${i + 1}. ${H.lang === "en" ? c.en : c.zh}：${(p["c_" + c.key] || "").trim()}`).join("\n") }) }),
-          H.btn(L("朗讀／Podcast", "Read aloud"), { icon: "play", small: true, variant: "ghost", onclick: () => H.openVoice({ title: p.title, text: H.paperScript(p) }) })))))
+          H.btn(L("朗讀／Podcast", "Read aloud"), { icon: "play", small: true, variant: "ghost", onclick: () => H.openVoice({ title: p.title, text: H.paperScript(p) }) }),
+          H.btn(p.review_date ? L("已複習", "Reviewed") : L("加入複習排程", "Start reviewing"), { icon: "check", small: true, variant: isDue(p) ? "outline" : "ghost", onclick: () => reviewPaper(p) }),
+          p.review_date ? el("span.muted.sm" + (isDue(p) ? ".due" : ""), null, isDue(p) ? L("今天該複習", "Due today") : L(`下次複習 ${p.review_date}`, `Next review ${p.review_date}`)) : null))))
         : el("p.empty", null, L("在文獻的編輯視窗填「資料夾」，文獻就會出現在這裡，並可依 5C 筆記做文獻解析與出題。", "Give papers a Folder in their editor to organise readings here."));
     } else {
       main = qs.length ? el("div.ex-list", null, qs.map((q) => {
@@ -256,6 +289,13 @@
             el("span.mono.muted.sm.push", null, [q.folder, q.source, q.year || ""].filter(Boolean).join(" · "))),
           el("p.ex-qtext", null, q.text),
           paper ? el("p.muted.sm", null, H.icon("file", 12), " " + paper.title) : null,
+          (() => {
+            const tries = s.attempts.filter((a) => a.question_id === q.id).reverse();
+            if (!tries.length) return null;
+            return el("p.ex-history", { title: L("歷次分數", "Score history") }, el("span.lbl", null, L(`練習 ${tries.length} 次`, `${tries.length} attempt(s)`)),
+              tries.slice(-8).map((a) => el("span.ex-try.mono" + (a.score >= 80 ? ".hi" : a.score >= 60 ? ".mid" : ".lo"), { title: a.created.slice(0, 10) }, String(a.score))),
+              q.review_date ? el("span.muted.sm" + (isDue(q) ? ".due" : ""), null, isDue(q) ? L("今天該複習", "Due today") : L(`下次複習 ${q.review_date}`, `Next review ${q.review_date}`)) : null);
+          })(),
           q.analysis || q.outline || q.feedback ? el("details.c5-more", null, el("summary", null, L("解析與答題架構", "Analysis and outline")),
             q.analysis ? el("pre.ex-pre", null, q.analysis) : null, q.outline ? el("pre.ex-pre", null, q.outline) : null,
             q.feedback ? el("pre.ex-pre.fb", null, L("上次講評\n", "Last feedback\n") + q.feedback) : null) : null,
@@ -285,7 +325,24 @@
           "Drop or choose a paper (PDF, .docx, .txt). The hub reads it and drafts essay questions with outlines; only the ones you tick are saved. The file stays on this computer unless AI is ticked."))),
       el("div.ex-upload-act", null, upFolder, upBtn, fileIn));
     const practiced = s.questions.filter((q) => q.status !== "new").length;
-    return el("div.ex", null, drop, toolbar,
+    const queue = H.reviewQueue(), stats = H.examStats().filter((g) => g.total);
+    const todayCard = s.questions.length || queue.papers.length ? el("div.ex-today", null,
+      el("div.card", null, el("div.card-head", null, el("h4", null, L("今天該複習", "Review today")),
+        el("span.mono.muted", null, L(`到期考題 ${queue.dueQuestions} · 文獻 ${queue.papers.length}`, `${queue.dueQuestions} questions · ${queue.papers.length} papers due`))),
+        queue.questions.length ? el("ol.ex-queue", null, queue.questions.map((q) => el("li", null,
+          el("button.ex-queue-q", { type: "button", onclick: () => H.practiceQuestion(q) }, q.text),
+          el("span.pill" + (isDue(q) ? ".warn" : ""), null, isDue(q) ? L(`上次 ${q.score} 分`, `last ${q.score}`) : L("未練習", "New")))))
+          : el("p.muted.sm", null, L("今天沒有到期的考題。", "No questions due today.")),
+        queue.papers.length ? el("ul.ex-queue.papers", null, queue.papers.slice(0, 3).map((p) => el("li", null,
+          el("button.ex-queue-q", { type: "button", onclick: () => H.openVoice({ title: p.title, text: H.paperScript(p) }) }, H.icon("play", 13), " " + p.title),
+          H.btn(L("已複習", "Reviewed"), { small: true, variant: "ghost", icon: "check", onclick: () => reviewPaper(p) })))) : null),
+      el("div.card", null, el("div.card-head", null, el("h4", null, L("弱點分析", "Weak spots")), el("span.mono.muted", null, L("各資料夾最近一次分數的平均", "average latest score per folder"))),
+        stats.some((g) => g.done) ? el("ul.ex-weak", null, stats.map((g) => el("li", null,
+          el("button.ex-weak-name", { type: "button", onclick: () => go({ examFolder: g.folder, examMode: "questions" }) }, g.folder || L("未分類", "Unfiled")),
+          el("div.tp-track", null, el("i." + (g.avg == null ? "none" : g.avg >= 80 ? "hi" : g.avg >= 60 ? "mid" : "lo"), { style: { width: (g.avg ?? 0) + "%" } })),
+          el("span.mono", null, g.avg == null ? "—" : String(g.avg)), el("span.mono.muted.sm", null, `${g.done}/${g.total}`))))
+          : el("p.muted.sm", null, L("完成第一次申論練習後，這裡會顯示各主題的分數，最弱的排最上面。", "After your first practice, scores per topic appear here, weakest first.")))) : null;
+    return el("div.ex", null, drop, todayCard, toolbar,
       el("div.ex-body", null, el("div", null, side, s.questions.length ? el("p.muted.sm.ex-stat", null, L(`已練習 ${practiced} / ${s.questions.length} 題`, `${practiced} / ${s.questions.length} practised`)) : null,
         s.questions.length ? seedBtn : null), main));
   };
