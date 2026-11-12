@@ -818,3 +818,74 @@ button.stat:hover { background: var(--bg-soft); }
 .dz .card { margin-bottom: 16px; }
 tr.dz-hl th, tr.dz-hl td { background: var(--ok-soft); }
 @media (max-width: 900px) { .dz-top { grid-template-columns: 1fr; } }
+
+/* ---------- title strength check ---------- */
+.btn.busy { opacity: .6; pointer-events: none; }
+span.grow { flex: 1; }
+.tp { margin-bottom: 22px; }
+.tp .toolbar { margin: 14px 0 0; }
+.tp .toolbar > .btn.primary { margin-left: 0; }
+.tp-result { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); display: grid; gap: 14px; }
+.tp-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.tp-meter { display: flex; gap: 4px; width: 180px; }
+.tp-seg { flex: 1; height: 8px; border-radius: 4px; background: var(--bg-sunk); }
+.tp-seg.on.weak { background: var(--bad); } .tp-seg.on.medium { background: var(--warn); } .tp-seg.on.strong { background: var(--ok); }
+.tp-level.weak { color: var(--bad); } .tp-level.medium { color: var(--warn); } .tp-level.strong { color: var(--ok); }
+.tp-score { margin-left: auto; font-size: 13px; color: var(--muted); }
+.tp-bars { display: grid; gap: 8px; }
+.tp-bar { display: grid; grid-template-columns: minmax(150px, 240px) 1fr 48px; gap: 12px; align-items: center; font-size: 13px; }
+.tp-track { height: 6px; border-radius: 3px; background: var(--bg-sunk); overflow: hidden; }
+.tp-track i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.tp-tokens { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.tp .lbl { font-size: 12px; color: var(--muted); }
+.tp-tr { margin: 0; font-size: 13.5px; display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.tp-regions { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.tp-region { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.tp-region h5 { margin: 0 0 6px; font-size: 14px; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.tp-region p { margin: 0 0 8px; }
+.pill.tp-crowded { background: var(--bad-soft); color: var(--bad); } .pill.tp-done { background: var(--warn-soft); color: var(--warn); }
+.pill.tp-partial { background: var(--accent-soft); color: var(--accent-ink); } .pill.tp-rare { background: var(--ok-soft); color: var(--ok); }
+.tp-works { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.tp-works li { display: grid; grid-template-columns: 44px 1fr auto; gap: 8px; align-items: baseline; }
+.tp-pct { font-size: 12px; } .tp-pct.hi { color: var(--bad); } .tp-pct.mid { color: var(--warn); } .tp-pct.lo { color: var(--muted); }
+.tp-todo ul { margin: 6px 0 0; padding-left: 18px; font-size: 13.5px; }
+@media (max-width: 800px) { .tp-regions { grid-template-columns: 1fr; } .tp-bar { grid-template-columns: 1fr 60px 44px; } }
+
+/* ---------- exam practice ---------- */
+.ex-body { display: grid; grid-template-columns: 200px 1fr; gap: 20px; align-items: start; }
+.ex-folders { display: grid; gap: 2px; margin-bottom: 12px; }
+.ex-folder { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; padding: 7px 10px; border: 0; background: none; border-radius: 9px; font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; color: var(--ink-2); }
+.ex-folder:hover { background: var(--bg-soft); } .ex-folder.on { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.ex-folder span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-stat { margin: 0 0 10px 10px; }
+.ex-list { display: grid; gap: 12px; }
+.ex-card { border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; background: #fff; }
+.ex-card.mastered { border-left: 3px solid var(--ok); } .ex-card.practiced { border-left: 3px solid var(--accent); }
+.ex-card-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.ex-qtext { margin: 0 0 8px; font-size: 15px; line-height: 1.7; }
+.ex-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.ex-pre { white-space: pre-wrap; font: inherit; font-size: 13.5px; line-height: 1.7; margin: 8px 0 0; padding: 10px 12px; background: var(--bg-soft); border-radius: 10px; }
+.ex-pre.fb { background: var(--accent-soft); }
+.pill.kind-past { background: var(--violet-soft); color: var(--violet); } .pill.kind-predicted { background: var(--accent-soft); color: var(--accent-ink); }
+.pill.diff-hard { background: var(--bad-soft); color: var(--bad); } .pill.diff-medium { background: var(--warn-soft); color: var(--warn); } .pill.diff-easy { background: var(--ok-soft); color: var(--ok); }
+.ex-5c { margin: 8px 0 0; display: grid; grid-template-columns: 110px 1fr; gap: 4px 12px; font-size: 13.5px; }
+.ex-5c dt { color: var(--muted); } .ex-5c dd { margin: 0; }
+.ex-practice { display: grid; gap: 12px; }
+.ex-qbox { background: var(--bg-soft); border-radius: 12px; padding: 14px 16px; }
+.ex-meta { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.ex-clock { font-size: 20px; font-weight: 600; } .ex-clock.late { color: var(--bad); }
+.ex-answer { min-height: 280px; line-height: 1.8; font-size: 15px; }
+.ex-feedback:empty { display: none; }
+.ex-feedback { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; font-size: 13.5px; }
+.ex-score strong { font-size: 28px; }
+.ex-hit, .ex-miss { list-style: none; padding: 0; margin: 8px 0; display: grid; gap: 4px; }
+.ex-hit li, .ex-miss li { display: flex; gap: 7px; align-items: flex-start; } .ex-hit svg, .ex-miss svg { flex: none; margin-top: 3px; }
+.ex-hit li { color: var(--ok); } .ex-miss li { color: var(--warn); }
+.ex-predict { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.ex-predict li { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: grid; gap: 4px; }
+@media (max-width: 800px) { .ex-body { grid-template-columns: 1fr; } .ex-5c { grid-template-columns: 1fr; } }
+
+/* ---------- voice ---------- */
+.vo { display: grid; gap: 10px; }
+.vo .lbl { font-size: 12px; color: var(--muted); }
+.vo-slider { display: grid; gap: 6px; } .vo-slider input { width: 100%; accent-color: var(--accent); }

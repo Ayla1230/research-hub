@@ -50,7 +50,8 @@ GLOSSARY = {
     "心理安全感": "psychological safety", "建言行為": "voice behavior", "辱虐管理": "abusive supervision", "職場霸凌": "workplace bullying",
 }
 ZH_STOP = set("的 之 與 和 及 對 於 在 以 為 例 其 及其 或 而 是 中 從 由 並 等 一 個 性 之間 探討 研究 分析 影響 關係 效果 作用 角色 "
-              "視角 觀點 機制 模式 因素 相關 實證 初探 為例 個案 案例".split())
+              "視角 觀點 機制 模式 因素 相關 實證 初探 為例 個案 案例 何謂 請說明 說明 請 舉例 為何 如何 哪些 什麼 為什麼 研究者 可能 需要 各自 以及 "
+              "並 若 時 常 會 有 做法 常見 提出 產生 造成".split())
 EN_STOP = set("a an the of on in at for to and or with by from as is are be its their this that between among into toward towards "
               "study studies research analysis effect effects impact impacts role roles relationship relationships influence "
               "evidence case empirical exploring examining investigating investigation approach perspective based using".split())
@@ -273,8 +274,10 @@ def check(title: str, topic: dict, snapshot: dict, settings: dict, *, title_en: 
     weights = {"novelty": 0.4, "specificity": 0.25, "story": 0.35}
     known = {k: v for k, v in parts.items() if v is not None}
     score = round(sum(v * weights[k] for k, v in known.items()) / sum(weights[k] for k in known)) if known else 0
-    result.update(parts=parts, missing={"specificity": spec_missing, "story": story_missing}, score=score,
-                  level="strong" if score >= 70 else "medium" if score >= 40 else "weak")
+    level = "strong" if score >= 70 else "medium" if score >= 40 else "weak"
+    if novelty is None and level == "strong":
+        level = "medium"  # overlap with published work was not checked, so "strong" would be a guess
+    result.update(parts=parts, missing={"specificity": spec_missing, "story": story_missing}, score=score, level=level)
     return result
 
 

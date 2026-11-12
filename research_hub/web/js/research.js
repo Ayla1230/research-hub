@@ -147,6 +147,7 @@
     ["doi", "str"], ["url", "str"],
     ["local_path", "str", { wide: true, ph: "/Users/me/Papers/davis1989.pdf" }],
     ["tags", "str"], ["citekey", "str"],
+    ["folder", "str", { label: "paper_folder", ph: H.lang === "en" ? "e.g. Week 5 / Methods" : "例如 研究方法／第 5 週" }],
     ["abstract", "text", { wide: true, rows: 4 }],
     ["notes", "text", { wide: true, rows: 4 }],
     ...H.paperFiveCFields(),
@@ -454,7 +455,7 @@
 
   /* ================= section + modules ================= */
   const TABS = [["story", "tab_story", () => H.storyView()], ["rq", "tab_rq", rqView], ["variables", "tab_vars", variablesView], ["literature", "tab_lit", literatureView],
-    ["matrix", "tab_matrix", matrixView], ["model", "tab_model", modelView], ["design", "tab_design", () => H.designView()]];
+    ["matrix", "tab_matrix", matrixView], ["model", "tab_model", modelView], ["design", "tab_design", () => H.designView()], ["exam", "tab_exam", () => H.examView()]];
 
   H.render = H.render || {};
   H.render.core = function () {

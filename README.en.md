@@ -73,6 +73,26 @@ Based on Lange & Pfarrer (2017, *AMR*), "Sense and structure":
 - **5C reading notes** for every paper: the five questions, the complication type (problem / puzzle / twist) and which block of your story the paper supports. The literature list shows 5C completeness; **5C compare** lines papers up side by side.
 - Agents can propose story edits over MCP (you confirm).
 
+## Title strength check
+
+At the top of the 5C story tab, the title is rated Easy / Medium / Hard like a password meter: word segmentation (Chinese lexicon + bigrams), automatic Chinese → English translation (AI → MyMemory → built-in glossary), overlap with published work in Taiwan and abroad via OpenAlex (≥70% crowded, 50–70% done before, 30–50% partial, <30% rare), and a story score — why this topic, what it enables, who it helps. Without the online comparison the level is capped at Medium. The online check sends the title to OpenAlex and the translator; untick it to stay offline.
+
+## Research design check
+
+The Design check tab follows Bono & McNamara (2011): five pre-submission design questions, the conditions for a causal claim, and automatic warnings from each variable's measurement source, wave and the three control-variable judgments.
+
+## Exam practice
+
+Folders for questions and readings, question prediction (rules or AI), question analysis with an answer outline, reading analysis from 5C notes, and timed essay practice graded by outline coverage (plus AI comments when available). A 16-question research-methods starter bank (in Chinese, original wording) is included.
+
+## Voice podcast
+
+Turn the story, reading notes or an exam analysis into a script, choose voice, tone, pitch and speed, preview in the browser and export WAV with the computer's built-in voices (macOS `say`, Windows speech, Linux `espeak-ng`). Nothing is uploaded.
+
+## Word thesis export
+
+Export Word builds a .docx draft: cover, acknowledgements, abstract, contents and lists (pages i, ii, iii), chapters 1–3 (pages from 1), APA references. Body text uses a style named 論文設定0; fonts, size, line spacing and margins are configurable. In Word, right-click the contents and choose Update Field.
+
 ## Research model from your own writing
 
 In **Research core → Research model**, choose **From my writing** and paste or upload your draft (`.docx`, `.txt`, `.md`, `.tex`):

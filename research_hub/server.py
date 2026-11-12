@@ -618,6 +618,7 @@ def make_handler(app: App):
                 name = re.sub(r"[\\/:*?\"<>|\x00-\x1f]", "_", str(data.get("filename") or "podcast"))[:120] + ".wav"
                 return self._json(200, {"url": f"/api/exports/{app.add_export(blob, name)}", "name": name, "size": len(blob)})
             if path == "/api/exam/seed":
+                self._payload()
                 ops = exam.seed_ops(store.snapshot()["questions"])
                 if ops:
                     store.apply_ops(ops, actor="user")

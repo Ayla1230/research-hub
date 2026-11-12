@@ -108,6 +108,7 @@
     const n = countOf(pitch);
     const guide = [["st_g_abstract", "≈ 200 words"], ["st_g_intro", "3–4 pages"], ["st_g_second", "5–7 pages"], ["st_g_body", "10–15 pages"], ["st_g_discussion", "3–5 pages"]];
     return el("div.c5", null,
+      H.topicView ? H.topicView() : null,
       el("div.toolbar.wrap", null, el("p.hint-line.grow", null, t("st_hint")),
         el("span.pill" + (filled === 5 ? ".approved" : ""), null, t("st_filled", { n: filled }))),
       flow,

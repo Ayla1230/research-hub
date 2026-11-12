@@ -832,7 +832,8 @@ class TopicThesisTests(unittest.TestCase):
         strong = topic.check("信任對知覺有用性與使用意圖關係之調節效果：以台灣網路購物為例", full,
                              {"papers": [], "story": [{"key": k, "sentence": "這是一個足夠長的句子用來測試。"} for k in ("complication", "concern", "contribution")]}, {}, online=False)
         self.assertEqual(weak["level"], "weak")
-        self.assertEqual(strong["level"], "strong")
+        self.assertEqual(strong["level"], "medium")  # never "strong" before the online overlap check ran
+        self.assertGreaterEqual(strong["score"], 70)
         self.assertIn("reason", weak["missing"]["story"])
 
     def test_docx_structure(self):
