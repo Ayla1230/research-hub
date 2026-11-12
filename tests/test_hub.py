@@ -298,6 +298,50 @@ class TrackingTests(unittest.TestCase):
         self.assertIn("Perceived usefulness", q)
 
 
+class StoryTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.store = Store(Path(self.dir))
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_story_rows_fixed(self):
+        story = self.store.snapshot()["story"]
+        self.assertEqual([r["key"] for r in story], ["common", "complication", "concern", "course", "contribution"])
+        self.store.apply_ops([{"op": "update", "entity": "story", "match": {"key": "complication"}, "data": {"sentence": "Yet…"}}])
+        self.assertEqual(self.store.snapshot()["story"][1]["sentence"], "Yet…")
+        for op in ({"op": "create", "entity": "story", "data": {"key": "common"}},
+                   {"op": "delete", "entity": "story", "id": story[0]["id"]},
+                   {"op": "update", "entity": "story", "id": story[0]["id"], "data": {"key": "bogus"}}):
+            with self.subTest(op=op), self.assertRaises(ValidationError):
+                self.store.apply_ops([op])
+        pid = self.store.propose("agent", "story", [{"op": "update", "entity": "story", "match": {"key": "concern"}, "append": {"notes": "idea"}}])["id"]
+        self.store.decide(pid, True)
+        self.assertEqual(self.store.snapshot()["story"][2]["notes"], "idea")
+
+    def test_paper_five_c_fields(self):
+        res = self.store.apply_ops([{"op": "create", "entity": "paper", "data": {"title": "P", "c_common": "we know", "complication_type": "puzzle", "story_role": "complication"}}])
+        p = self.store.get("paper", res[0]["id"])
+        self.assertEqual((p["c_common"], p["complication_type"], p["story_role"]), ("we know", "puzzle", "complication"))
+        with self.assertRaises(ValidationError):
+            self.store.apply_ops([{"op": "update", "entity": "paper", "id": p["id"], "data": {"story_role": "plot"}}])
+
+    def test_old_workspace_migrates(self):
+        with self.store.db() as db:
+            db.executescript("""
+              DROP TABLE story;
+              CREATE TABLE papers_old AS SELECT id, title, authors, year, venue, doi, url, abstract, local_path, citekey, source, status,
+                rating, tags, notes, openalex_id, created, updated FROM papers;
+              DROP TABLE papers; ALTER TABLE papers_old RENAME TO papers;""")
+        store = Store(Path(self.dir))
+        with store.db() as db:
+            cols = {r["name"] for r in db.execute("PRAGMA table_info(papers)")}
+        self.assertTrue({"c_common", "c_contribution", "story_role", "complication_type"} <= cols)
+        self.assertEqual(len(store.snapshot()["story"]), 5)
+        store.apply_ops([{"op": "create", "entity": "paper", "data": {"title": "after migration", "c_course": "x"}}])
+
+
 class FrameworkTests(unittest.TestCase):
     ZH = ("研究假設如下：\nH1：知覺有用性對使用意圖有正向影響。\nH2：知覺易用性正向影響知覺有用性。\n"
           "H3：信任調節知覺有用性與使用意圖之間的關係。\nH4：使用態度在知覺有用性與使用意圖之間具有中介效果。\n"

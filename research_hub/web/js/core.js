@@ -3,7 +3,7 @@
   const H = window.H;
   const t = H.t;
   H.token = document.querySelector('meta[name="hub-token"]').content;
-  H.ui = { openStage: null, coreTab: "rq", editPipeline: false, litFilter: "", litStatus: "all", inboxTab: "pending" };
+  H.ui = { openStage: null, coreTab: "story", editPipeline: false, litFilter: "", litStatus: "all", inboxTab: "pending" };
 
   /* ---------- DOM ---------- */
   H.el = function el(tag, attrs, ...kids) {

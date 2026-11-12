@@ -147,6 +147,7 @@
     ["tags", "str"], ["citekey", "str"],
     ["abstract", "text", { wide: true, rows: 4 }],
     ["notes", "text", { wide: true, rows: 4 }],
+    ...H.paperFiveCFields(),
   ], p ? null : { status: "to_read", source: "manual", ...(defaults || {}) }, p ? t("edit") : t("add_paper"));
 
   /* ================= chips ================= */
@@ -272,11 +273,13 @@
         (!q || [p.title, p.authors, p.tags, p.venue, p.notes, String(p.year)].join(" ").toLowerCase().includes(q)));
       if (!papers.length) { H.put(table, el("div.empty-state", null, H.icon("book", 22), el("p", null, t("lit_empty")))); return; }
       if (!rows.length) { H.put(table, el("p.empty", null, t("no_results"))); return; }
-      H.put(table, el("ul.papers", null, rows.map((p) => paperRow(p, scope))));
+      H.put(table, H.ui.litView === "5c" ? H.fiveCCompare(rows) : el("ul.papers", null, rows.map((p) => paperRow(p, scope))));
     };
     drawTable();
     return el("div", null,
       el("div.toolbar.wrap", null, filter, statusChips,
+        el("div.seg.small", { role: "radiogroup", "aria-label": t("st_view") }, [["list", t("st_view_list")], ["5c", t("st_view_5c")]].map(([v, l]) =>
+          el("button.seg-btn", { type: "button", role: "radio", "aria-checked": String((H.ui.litView || "list") === v), onclick: () => { H.ui.litView = v; H.render.core(); H.render.pipeline(); } }, l))),
         el("div.tool-group", null,
           H.btn(t("import_bib"), { icon: "upload", variant: "ghost", small: true, onclick: () => bibInput.click() }), bibInput,
           H.btn(t("export_bib"), { icon: "download", variant: "ghost", small: true, onclick: () => exportBib() }),
@@ -303,7 +306,8 @@
     return el("li.paper" + (p.status === "excluded" ? ".excluded" : ""), null,
       el("div.paper-main", null,
         el("button.paper-title", { type: "button", onclick: () => H.editPaper(p) }, p.title),
-        el("div.meta", null, [shortAuthors(p.authors), p.year || null, p.venue].filter(Boolean).join(" · "),
+        el("div.meta", null, [shortAuthors(p.authors), p.year || null, p.venue].filter(Boolean).join(" · "), H.fiveCDots(p),
+          p.story_role ? el("span.pill.tiny", { title: t("st_role") }, (H.FIVE_C.find((c) => c.key === p.story_role) || {}).mark + " " + t("c5_" + p.story_role + "_short")) : null,
           p.rating ? el("span.stars", { "aria-label": p.rating + "/5" }, "★".repeat(p.rating)) : null,
           p.source && p.source !== "manual" ? el("span.src.mono", null, p.source.split(":")[0]) : null),
         el("div.chips", null, vlinks.map((l) => { const v = H.by(H.state.variables, l.variable_id); return v ? varChip(v, l.evidence) : null; }),
@@ -447,7 +451,7 @@
   }
 
   /* ================= section + modules ================= */
-  const TABS = [["rq", "tab_rq", rqView], ["variables", "tab_vars", variablesView], ["literature", "tab_lit", literatureView],
+  const TABS = [["story", "tab_story", () => H.storyView()], ["rq", "tab_rq", rqView], ["variables", "tab_vars", variablesView], ["literature", "tab_lit", literatureView],
     ["matrix", "tab_matrix", matrixView], ["model", "tab_model", modelView]];
 
   H.render = H.render || {};

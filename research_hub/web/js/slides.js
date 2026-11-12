@@ -23,24 +23,24 @@
   };
   const STATUS = { done: "0F7A52", active: "2B50E8", review: "6342CF", blocked: "C0322B", todo: "B9BDC7" };
   const ROLE = { iv: "2B50E8", dv: "0F7A52", med: "A35A00", mod: "6342CF", ctrl: "5D6270", other: "8A5A44" };
-  const SECTIONS = ["title", "overview", "rqs", "model", "hypotheses", "variables", "literature", "progress", "next", "closing"];
+  const SECTIONS = ["title", "story", "overview", "rqs", "model", "hypotheses", "variables", "literature", "progress", "next", "closing"];
   const PURPOSE = {
-    advisor: ["title", "overview", "progress", "rqs", "model", "next", "closing"],
-    defense: ["title", "rqs", "model", "hypotheses", "variables", "literature", "overview", "closing"],
-    conference: ["title", "rqs", "model", "hypotheses", "literature", "closing"],
+    advisor: ["title", "story", "overview", "progress", "rqs", "model", "next", "closing"],
+    defense: ["title", "story", "rqs", "model", "hypotheses", "variables", "literature", "overview", "closing"],
+    conference: ["title", "story", "rqs", "model", "hypotheses", "literature", "closing"],
   };
-  const PRIORITY = ["title", "model", "rqs", "overview", "next", "hypotheses", "progress", "literature", "variables", "closing"];
+  const PRIORITY = ["title", "story", "model", "rqs", "overview", "next", "hypotheses", "progress", "literature", "variables", "closing"];
 
   /* ---------- slide wording (the deck's own language) ---------- */
   const W = {
-    zh: { overview: "研究進度總覽", rqs: "研究問題", model: "研究架構", hypotheses: "研究假設", variables: "變數與操作型定義", literature: "文獻回顧",
+    zh: { story: "研究故事", overview: "研究進度總覽", rqs: "研究問題", model: "研究架構", hypotheses: "研究假設", variables: "變數與操作型定義", literature: "文獻回顧",
       progress: "近期進度", next: "下一步", thanks: "謝謝聆聽", qa: "敬請指教 · Q&A", overall: "整體進度", stagesDone: "已完成階段", deadline: "論文完成日",
       daysLeft: (n) => `剩 ${n} 天`, overdue: "已逾期", sym: "符號", variable: "變數", role: "角色", measure: "操作型定義／測量", papers: "文獻", total: "收錄文獻",
       read: "已讀完", reading: "閱讀中", noData: "（尚無資料）", hyp: (a, b, sign) => `${a}對${b}有${sign === "-" ? "負向" : sign === "+" ? "正向" : ""}影響`,
       modHyp: (z, a, b) => `${z}調節${a}與${b}之間的關係`, purpose: { advisor: "指導教授進度報告", defense: "論文口試", conference: "研討會發表" },
       roles: { iv: "自變數", dv: "依變數", med: "中介變數", mod: "調節變數", ctrl: "控制變數", other: "其他" }, status: { todo: "未開始", active: "進行中", review: "審閱中", done: "已完成", blocked: "受阻" },
       msgOverview: (p, s, sp) => `整體進度 ${p}%，目前進行「${s}」（${sp}%）`, msgModel: (n, r) => `${n} 個變數、${r} 條假設路徑`, msgNext: "接下來的待辦與期限" },
-    en: { overview: "Progress overview", rqs: "Research questions", model: "Research model", hypotheses: "Hypotheses", variables: "Variables & measures", literature: "Literature",
+    en: { story: "Research story", overview: "Progress overview", rqs: "Research questions", model: "Research model", hypotheses: "Hypotheses", variables: "Variables & measures", literature: "Literature",
       progress: "Recent progress", next: "Next steps", thanks: "Thank you", qa: "Questions & discussion", overall: "Overall", stagesDone: "Stages done", deadline: "Thesis deadline",
       daysLeft: (n) => `${n} days left`, overdue: "Overdue", sym: "Symbol", variable: "Variable", role: "Role", measure: "Operationalisation", papers: "Papers", total: "Papers",
       read: "Read", reading: "Reading", noData: "(nothing yet)", hyp: (a, b, sign) => `${a} has ${sign === "-" ? "a negative" : sign === "+" ? "a positive" : "an"} effect on ${b}`,
@@ -125,6 +125,21 @@
         slide.addText(`${w.overall}  ${s.overall}%`, { shape: pres.shapes.ROUNDED_RECTANGLE, x: M + 0.1, y: SH - 1.5, w: 2.3, h: 0.5, rectRadius: 0.25,
           fill: { color: th.dark }, line: { color: th.onDarkMuted, width: 1 }, color: th.onDark, fontSize: 13, bold: true, align: "center", valign: "middle", ...body, margin: 0 });
         if (notes.title) slide.addNotes(notes.title);
+      },
+      story() {
+        const { slide, top } = slideFor("story", w.story);
+        const rows = H.FIVE_C.map((c) => ({ c, text: ((s.story || []).find((r) => r.key === c.key) || {}).sentence || "" }));
+        const rowH = (SH - top - 0.8) / 5, labelW = o.size === "43" ? 2.5 : 3.3;
+        rows.forEach(({ c, text }, i) => {
+          const y = top + i * rowH;
+          circle(slide, String(i + 1), M, y + (rowH - 0.42) / 2, 0.42, text ? th.accent : th.line, 13);
+          slide.addText([{ text: o.lang === "en" ? c.en : c.zh, options: { bold: true, color: th.ink, fontSize: 15, breakLine: true } },
+            { text: o.lang === "en" ? c.starterEn : `${c.en} · ${c.starterEn}`, options: { color: th.muted, fontSize: 10 } }],
+          { x: M + 0.6, y, w: labelW - 0.6, h: rowH, valign: "middle", ...body, margin: 0, isTextBox: true });
+          slide.addText(text ? clip(text, SW - 2 * M - labelW - 0.2, 15, 2) : "—", { x: M + labelW, y, w: SW - 2 * M - labelW, h: rowH, fontSize: 15,
+            color: text ? th.ink : th.muted, ...body, margin: 0, valign: "middle", isTextBox: true });
+          if (i < 4) slide.addShape(pres.shapes.LINE, { x: M + labelW, y: y + rowH, w: SW - 2 * M - labelW, h: 0.001, line: { color: th.line, width: 0.75 } });
+        });
       },
       overview() {
         const { slide, top } = slideFor("overview", w.overview);
@@ -361,7 +376,7 @@
     if (has(/4\s*[:：比]\s*3/)) { o.size = "43"; applied.push("4:3"); } else if (has(/16\s*[:：比]\s*9|寬螢幕|widescreen/i)) { o.size = "169"; applied.push("16:9"); }
     const pages = text.match(/(\d{1,2})\s*(?:頁|張|slides?|pages?)/i);
     if (pages) { o.maxSlides = Number(pages[1]); applied.push((H.lang === "en" ? "max " : "最多 ") + pages[1] + (H.lang === "en" ? " slides" : " 頁")); }
-    const LABELS = { overview: /總覽|進度|overview/i, rqs: /研究問題|rq/i, model: /架構|model/i, hypotheses: /假設|hypothes/i, variables: /變數|variable/i, literature: /文獻|literature/i, progress: /近期|日誌|recent/i, next: /下一步|待辦|next/i, closing: /結尾|謝謝|q&a|closing/i };
+    const LABELS = { story: /故事|5c|story|pitch/i, overview: /總覽|進度|overview/i, rqs: /研究問題|rq/i, model: /架構|model/i, hypotheses: /假設|hypothes/i, variables: /變數|variable/i, literature: /文獻|literature/i, progress: /近期|日誌|recent/i, next: /下一步|待辦|next/i, closing: /結尾|謝謝|q&a|closing/i };
     for (const m of text.matchAll(/(?:不要|不用|不需要|拿掉|去掉|移除|without|no)\s*([^，。,;\n]{1,10})/gi)) {
       for (const [k, re] of Object.entries(LABELS)) if (re.test(m[1]) && o.sections.includes(k)) { o.sections = o.sections.filter((x) => x !== k); applied.push("− " + t("sl_sec_" + k)); }
     }

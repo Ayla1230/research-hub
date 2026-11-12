@@ -29,6 +29,9 @@ RESOURCE_KINDS = ("database", "folder", "mcp", "code", "link")
 REMOVED_SETTINGS = ("paperread_url", "paperread_library")
 MODULES = ("", "literature", "rq", "variables", "code", "writing")
 RELATION_KINDS = ("effect", "moderates")
+# Lange & Pfarrer (2017): the five core building blocks of a theory paper ("5C").
+FIVE_C = ("common", "complication", "concern", "course", "contribution")
+COMPLICATION_TYPES = ("", "problem", "puzzle", "twist")
 SIGNS = ("", "+", "-")
 EVIDENCE = ("", "supports", "contradicts", "mixed", "defines", "measures", "mentions")
 
@@ -80,8 +83,19 @@ ENTITIES: dict[str, dict] = {
             "source": ("str", None), "status": ("enum", PAPER_STATUS), "rating": ("int", (0, 5)),
             "tags": ("str", None), "notes": ("text", None),
             "openalex_id": ("str", None),
+            # 5C reading notes: answer the five questions for every paper you read
+            "c_common": ("text", None), "c_complication": ("text", None), "c_concern": ("text", None),
+            "c_course": ("text", None), "c_contribution": ("text", None),
+            "complication_type": ("enum", COMPLICATION_TYPES),
+            "story_role": ("enum", ("",) + FIVE_C),  # which block of MY story this paper supports
         },
         "required": ("title",),
+    },
+    "story": {  # my own research story, one row per C (fixed: updated, never created or deleted)
+        "table": "story",
+        "fields": {"key": ("enum", FIVE_C), "sentence": ("text", None), "notes": ("text", None)},
+        "required": ("key",),
+        "fixed": True,
     },
     "relation": {  # a hypothesised path in the research model, e.g. H1: X1 → Y1 (+)
         "table": "relations",
@@ -216,6 +230,10 @@ CREATE TABLE IF NOT EXISTS relations (
   label TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0,
   created TEXT NOT NULL, updated TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS story (
+  id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, sentence TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+  created TEXT NOT NULL, updated TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS usage (
   day TEXT NOT NULL, provider TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (day, provider)
@@ -294,6 +312,13 @@ class Store:
             cols = {r["name"] for r in db.execute("PRAGMA table_info(stages)")}
             if "goal" not in cols:  # workspaces created by v1.0.0
                 db.execute("ALTER TABLE stages ADD COLUMN goal TEXT NOT NULL DEFAULT ''")
+            paper_cols = {r["name"] for r in db.execute("PRAGMA table_info(papers)")}
+            for col in ("c_common", "c_complication", "c_concern", "c_course", "c_contribution", "complication_type", "story_role"):
+                if col not in paper_cols:
+                    db.execute(f"ALTER TABLE papers ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+            stamp = now()
+            for key in FIVE_C:
+                db.execute("INSERT OR IGNORE INTO story (key, created, updated) VALUES (?, ?, ?)", (key, stamp, stamp))
             # v1.1 dropped the PaperRead integration: keep the data, drop what pointed at it.
             db.execute(f"DELETE FROM settings WHERE k IN ({', '.join('?' * len(REMOVED_SETTINGS))})", REMOVED_SETTINGS)
             db.execute("DELETE FROM resources WHERE kind='paperread' AND name='PaperRead' AND target='http://127.0.0.1:8765'")
@@ -437,6 +462,8 @@ class Store:
                 "rqs": rows("SELECT * FROM rqs ORDER BY position, id"),
                 "variables": rows("SELECT * FROM variables ORDER BY position, id"),
                 "relations": rows("SELECT * FROM relations ORDER BY position, id"),
+                "story": rows("SELECT * FROM story ORDER BY CASE key WHEN 'common' THEN 0 WHEN 'complication' THEN 1 "
+                              "WHEN 'concern' THEN 2 WHEN 'course' THEN 3 ELSE 4 END"),
                 "papers": rows("SELECT * FROM papers ORDER BY updated DESC, id DESC"),
                 "resources": rows("SELECT * FROM resources ORDER BY kind, position, id"),
                 "files": rows("SELECT * FROM files ORDER BY created DESC, id DESC"),
@@ -560,7 +587,7 @@ class Store:
         match = op.get("match")
         if isinstance(match, dict) and len(match) == 1:
             (field, value), = match.items()
-            if field not in spec["fields"] or spec["fields"][field][0] not in ("str",):
+            if field not in spec["fields"] or spec["fields"][field][0] not in ("str", "enum"):
                 raise ValidationError(f"cannot match {entity} by {field}")
             rows = db.execute(f"SELECT id FROM {spec['table']} WHERE {field}=?", (str(value),)).fetchall()
             if len(rows) != 1:
@@ -585,6 +612,8 @@ class Store:
         if entity not in ENTITIES:
             raise ValidationError(f"unknown entity {entity!r}")
         spec = ENTITIES[entity]
+        if spec.get("fixed") and kind in ("create", "delete"):
+            raise ValidationError(f"{entity} rows are fixed; only updates are allowed")
         if spec.get("internal") and not allow_internal and kind != "delete":
             raise ValidationError(f"{entity} records are managed by the upload endpoint")
         table = spec["table"]

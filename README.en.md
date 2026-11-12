@@ -65,6 +65,14 @@ Choose Google Gemini (free tier), Groq, OpenRouter free models, a local Ollama, 
 
 **Today's usage** in the Integration hub shows requests and tokens per source and for the AI, the limits, and the time until reset. Limits are set in Settings; when one is reached, that source stops for the day and resets at local midnight.
 
+## 5C research story and 5C reading notes
+
+Based on Lange & Pfarrer (2017, *AMR*), "Sense and structure":
+
+- **Story board** (first tab of the Research core): common ground → complication → concern → course of action → contribution. One sentence each (We know that… / Yet… / This matters because… / We develop… / This changes…), with guiding questions, notes and the papers that support each block. The five sentences form the five-sentence pitch (an abstract draft of about 200 words) and can go into the slides. A length guide is included (abstract ≈200 words, introduction 3–4 pages, second section 5–7, main body 10–15, discussion 3–5 — guidelines, not rules).
+- **5C reading notes** for every paper: the five questions, the complication type (problem / puzzle / twist) and which block of your story the paper supports. The literature list shows 5C completeness; **5C compare** lines papers up side by side.
+- Agents can propose story edits over MCP (you confirm).
+
 ## Research model from your own writing
 
 In **Research core → Research model**, choose **From my writing** and paste or upload your draft (`.docx`, `.txt`, `.md`, `.tex`):
@@ -81,7 +89,7 @@ In **Research core → Research model**, choose **From my writing** and paste or
 
 1. **Design instructions**: describe the deck in a sentence, e.g. "progress report for my advisor, 10 slides, navy, serif titles, Microsoft JhengHei body, no literature". **Apply instructions** sets colours, fonts, purpose, slide count, language, size and which slides to include or drop. Optionally let the AI write each slide's key message and speaker notes (counts toward today's quota); otherwise they are generated from your data.
 2. **Purpose**: advisor progress report, thesis defense or conference talk, each with default slides.
-3. **Slides**: cover, progress overview, research questions, research model, hypotheses, variables table, literature, recent progress, next steps, closing Q&A.
+3. **Slides**: cover, research story 5C, progress overview, research questions, research model, hypotheses, variables table, literature, recent progress, next steps, closing Q&A.
 4. **Look & fonts**: five colour themes; separate heading and body fonts — Noto Serif TC (open-source Ming/Song), PMingLiU (Windows Ming), Microsoft JhengHei, Noto Sans TC, DFKai-SB, PingFang TC. Fonts are set on every text run and in the deck theme, so new text typed in PowerPoint uses them too. Open-source fonts must be installed on the computer that shows the deck (links in the window).
 5. **Export PowerPoint**: a `.pptx` (16:9 or 4:3) whose research model is drawn with native, editable PowerPoint shapes; optionally filed under the Defense stage.
 

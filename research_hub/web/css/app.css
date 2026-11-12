@@ -692,6 +692,55 @@ button.stat:hover { background: var(--bg-soft); }
 .sl-mini-card i { width: 18px; height: 18px; border-radius: 50%; flex: none; }
 @media (max-width: 760px) { .sl-preview { grid-template-columns: 1fr; } }
 
+
+/* ---------- 5C research story ---------- */
+.c5 { display: grid; gap: 18px; }
+.c5-flow { list-style: none; margin: 0; padding: 18px 12px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 16px; background: var(--bg-soft); }
+.c5-step { position: relative; display: grid; justify-items: center; gap: 4px; text-align: center; padding: 0 6px; }
+.c5-dot { width: 42px; height: 42px; border-radius: 50%; border: 1.5px solid var(--line-2); background: #fff; display: grid; place-items: center; font-size: 17px; color: var(--muted); cursor: pointer; }
+.c5-step.done .c5-dot { background: var(--ink); border-color: var(--ink); color: #fff; }
+.c5-name { font-weight: 600; font-size: 13.5px; margin-top: 4px; }
+.c5-q { font-size: 12px; color: var(--muted); line-height: 1.4; }
+.c5-arrow { position: absolute; right: -8px; top: 10px; color: #b5651d; font-weight: 700; }
+.c5-cards { display: grid; gap: 12px; }
+.c5-card { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 18px; border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; background: #fff; }
+.c5-card:focus-within { border-color: var(--line-2); box-shadow: var(--shadow-2); }
+.c5-side { display: grid; align-content: start; gap: 3px; }
+.c5-num { font-size: 11px; color: var(--faint); }
+.c5-mark { font-size: 20px; color: var(--accent); line-height: 1.2; }
+.c5-side h4 { font-size: 16px; font-weight: 600; }
+.c5-en { font-size: 11.5px; color: var(--muted); }
+.c5-starter { font-size: 11px; color: var(--faint); margin-top: 6px; }
+.c5-main { display: grid; gap: 8px; min-width: 0; }
+.c5-qrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; }
+.c5-main textarea { font-size: 15px; }
+.c5-more summary { cursor: pointer; font-size: 12.5px; color: var(--muted); }
+.c5-prompts { margin: 8px 0 8px; padding-left: 18px; font-size: 13px; color: var(--ink-2); display: grid; gap: 3px; }
+.c5-papers { display: grid; gap: 6px; }
+.c5-bottom { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; }
+.c5-pitch { font-size: 15px; line-height: 1.8; padding: 12px 14px; border-radius: 10px; background: var(--bg-soft); border: 1px solid var(--line); margin-bottom: 8px; white-space: pre-wrap; }
+.c5-guide { width: 100%; border-collapse: collapse; font-size: 13px; }
+.c5-guide th, .c5-guide td { text-align: left; padding: 7px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+.c5-guide th { font-weight: 600; white-space: nowrap; }
+.c5-guide td.mono { white-space: nowrap; color: var(--muted); }
+.c5-dots { display: inline-flex; gap: 3px; margin-left: 4px; }
+.c5-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); }
+.c5-dots i.on { background: #b5651d; }
+.c5-table { border-collapse: separate; border-spacing: 0; font-size: 13px; min-width: 900px; width: 100%; }
+.c5-table th, .c5-table td { border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+.c5-table thead th { position: sticky; top: 0; background: var(--bg-soft); font-size: 12.5px; z-index: 1; }
+.c5-table tbody th { background: #fff; min-width: 140px; font-weight: 500; }
+.c5-cell { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5; }
+.c5-table .pill.tiny { margin: 0 4px 4px 0; }
+@media (max-width: 900px) {
+  .c5-card { grid-template-columns: 1fr; gap: 8px; }
+  .c5-bottom { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .c5-flow { grid-template-columns: repeat(5, 72px); overflow-x: auto; }
+  .c5-q { display: none; }
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 1080px) {
   .jump { display: none; }
