@@ -32,6 +32,11 @@ RELATION_KINDS = ("effect", "moderates")
 # Lange & Pfarrer (2017): the five core building blocks of a theory paper ("5C").
 FIVE_C = ("common", "complication", "concern", "course", "contribution")
 COMPLICATION_TYPES = ("", "problem", "puzzle", "twist")
+# Bono & McNamara (2011), "Publishing in AMJ — Part 2: Research design"
+MEASURE_SOURCES = ("", "self", "supervisor", "peer", "objective", "manipulated", "other")
+DESIGN_PURPOSES = ("", "describe", "change", "causal")
+DESIGN_TYPES = ("", "cross_sectional", "longitudinal", "experiment")
+CHECK_STATUS = ("", "ok", "issue")
 SIGNS = ("", "+", "-")
 EVIDENCE = ("", "supports", "contradicts", "mixed", "defines", "measures", "mentions")
 
@@ -71,6 +76,10 @@ ENTITIES: dict[str, dict] = {
             "symbol": ("str", None), "name_zh": ("str", None), "name_en": ("str", None),
             "role": ("enum", VAR_ROLES), "definition": ("text", None),
             "measurement": ("text", None), "notes": ("text", None), "position": ("int", None),
+            # research design: who reports it and when (common method variance, temporal order)
+            "measure_source": ("enum", MEASURE_SOURCES), "wave": ("int", (0, 20)),
+            # control variables: Becker (2005) as cited by Bono & McNamara — related to Y, to X, and not a core/mediating variable
+            "ctrl_y": ("bool", None), "ctrl_x": ("bool", None), "ctrl_not_core": ("bool", None), "rationale": ("text", None),
         },
         "required": ("symbol",),
     },
@@ -90,6 +99,17 @@ ENTITIES: dict[str, dict] = {
             "story_role": ("enum", ("",) + FIVE_C),  # which block of MY story this paper supports
         },
         "required": ("title",),
+    },
+    "design": {  # one research-design profile per workspace (fixed row, key "main")
+        "table": "design",
+        "fields": {
+            "key": ("str", None), "purpose": ("enum", DESIGN_PURPOSES), "design": ("enum", DESIGN_TYPES),
+            "waves": ("int", (0, 20)), "sample": ("text", None), "limitations": ("text", None),
+            **{f"q{i}_status": ("enum", CHECK_STATUS) for i in range(1, 6)},
+            **{f"q{i}_note": ("text", None) for i in range(1, 6)},
+        },
+        "required": ("key",),
+        "fixed": True,
     },
     "story": {  # my own research story, one row per C (fixed: updated, never created or deleted)
         "table": "story",
@@ -234,6 +254,14 @@ CREATE TABLE IF NOT EXISTS story (
   id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, sentence TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
   created TEXT NOT NULL, updated TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS design (
+  id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, purpose TEXT NOT NULL DEFAULT '', design TEXT NOT NULL DEFAULT '',
+  waves INTEGER NOT NULL DEFAULT 0, sample TEXT NOT NULL DEFAULT '', limitations TEXT NOT NULL DEFAULT '',
+  q1_status TEXT NOT NULL DEFAULT '', q2_status TEXT NOT NULL DEFAULT '', q3_status TEXT NOT NULL DEFAULT '',
+  q4_status TEXT NOT NULL DEFAULT '', q5_status TEXT NOT NULL DEFAULT '',
+  q1_note TEXT NOT NULL DEFAULT '', q2_note TEXT NOT NULL DEFAULT '', q3_note TEXT NOT NULL DEFAULT '',
+  q4_note TEXT NOT NULL DEFAULT '', q5_note TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, updated TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS usage (
   day TEXT NOT NULL, provider TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (day, provider)
@@ -319,6 +347,13 @@ class Store:
             stamp = now()
             for key in FIVE_C:
                 db.execute("INSERT OR IGNORE INTO story (key, created, updated) VALUES (?, ?, ?)", (key, stamp, stamp))
+            db.execute("INSERT OR IGNORE INTO design (key, created, updated) VALUES ('main', ?, ?)", (stamp, stamp))
+            var_cols = {r["name"] for r in db.execute("PRAGMA table_info(variables)")}
+            for col, ddl in (("measure_source", "TEXT NOT NULL DEFAULT ''"), ("wave", "INTEGER NOT NULL DEFAULT 0"),
+                             ("ctrl_y", "INTEGER NOT NULL DEFAULT 0"), ("ctrl_x", "INTEGER NOT NULL DEFAULT 0"),
+                             ("ctrl_not_core", "INTEGER NOT NULL DEFAULT 0"), ("rationale", "TEXT NOT NULL DEFAULT ''")):
+                if col not in var_cols:
+                    db.execute(f"ALTER TABLE variables ADD COLUMN {col} {ddl}")
             # v1.1 dropped the PaperRead integration: keep the data, drop what pointed at it.
             db.execute(f"DELETE FROM settings WHERE k IN ({', '.join('?' * len(REMOVED_SETTINGS))})", REMOVED_SETTINGS)
             db.execute("DELETE FROM resources WHERE kind='paperread' AND name='PaperRead' AND target='http://127.0.0.1:8765'")
@@ -462,6 +497,7 @@ class Store:
                 "rqs": rows("SELECT * FROM rqs ORDER BY position, id"),
                 "variables": rows("SELECT * FROM variables ORDER BY position, id"),
                 "relations": rows("SELECT * FROM relations ORDER BY position, id"),
+                "design": (rows("SELECT * FROM design WHERE key='main'") or [{}])[0],
                 "story": rows("SELECT * FROM story ORDER BY CASE key WHEN 'common' THEN 0 WHEN 'complication' THEN 1 "
                               "WHEN 'concern' THEN 2 WHEN 'course' THEN 3 ELSE 4 END"),
                 "papers": rows("SELECT * FROM papers ORDER BY updated DESC, id DESC"),

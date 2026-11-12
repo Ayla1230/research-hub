@@ -133,6 +133,8 @@
     ["name_zh", "str"], ["name_en", "str"],
     ["definition", "text", { wide: true }],
     ["measurement", "text", { wide: true }],
+    ["measure_source", "select", { label: "dz_source", options: [["", "—"], ...["self", "supervisor", "peer", "objective", "manipulated", "other"].map((x) => [x, t("src_" + x)])] }],
+    ["wave", "select", { label: "dz_wave", options: [["0", "—"], ...[1, 2, 3, 4, 5, 6].map((n) => [String(n), "T" + n])] }],
     ["notes", "text", { wide: true }],
   ], v ? null : { role: role || "iv", symbol: nextSymbol(role || "iv") }, v ? `${t("edit")} · ${v.symbol}` : t("add_variable"));
 
@@ -452,7 +454,7 @@
 
   /* ================= section + modules ================= */
   const TABS = [["story", "tab_story", () => H.storyView()], ["rq", "tab_rq", rqView], ["variables", "tab_vars", variablesView], ["literature", "tab_lit", literatureView],
-    ["matrix", "tab_matrix", matrixView], ["model", "tab_model", modelView]];
+    ["matrix", "tab_matrix", matrixView], ["model", "tab_model", modelView], ["design", "tab_design", () => H.designView()]];
 
   H.render = H.render || {};
   H.render.core = function () {

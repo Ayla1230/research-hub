@@ -33,14 +33,14 @@ PAPERS = [
 
 VARIABLES = [
     dict(ref="x1", symbol="X1", role="iv", name_zh="知覺有用性", name_en="Perceived usefulness",
-         definition="使用者相信使用系統能提升其工作績效的程度。", measurement="Davis (1989) 六題，Likert 7 點"),
+         definition="使用者相信使用系統能提升其工作績效的程度。", measurement="Davis (1989) 六題，Likert 7 點", measure_source="self", wave=1),
     dict(ref="x2", symbol="X2", role="iv", name_zh="知覺易用性", name_en="Perceived ease of use",
-         definition="使用者認為使用系統不需費力的程度。", measurement="Davis (1989) 六題，Likert 7 點"),
+         definition="使用者認為使用系統不需費力的程度。", measurement="Davis (1989) 六題，Likert 7 點", measure_source="self", wave=1),
     dict(ref="m1", symbol="M1", role="med", name_zh="使用態度", name_en="Attitude toward using"),
     dict(ref="z1", symbol="Z1", role="mod", name_zh="信任", name_en="Trust", definition="對系統與服務提供者的信任程度。"),
     dict(ref="y1", symbol="Y1", role="dv", name_zh="使用意圖", name_en="Behavioral intention",
-         measurement="Venkatesh et al. (2003) 三題"),
-    dict(ref="c1", symbol="C1", role="ctrl", name_zh="使用經驗", name_en="Prior experience"),
+         measurement="Venkatesh et al. (2003) 三題", measure_source="self", wave=1),
+    dict(ref="c1", symbol="C1", role="ctrl", name_zh="使用經驗", name_en="Prior experience", ctrl_y=True, ctrl_x=True),
 ]
 
 LINKS = [("x1", "davis", "defines"), ("x1", "utaut", "supports"), ("x2", "davis", "defines"), ("x2", "gefen", "supports"),
@@ -85,6 +85,8 @@ def apply(store: Store) -> bool:
         "contribution": "研究結果將說明 TAM 的邊界條件，並提供提升信任的實務建議。",
     }
     ops += [{"op": "update", "entity": "story", "match": {"key": k}, "data": {"sentence": v}} for k, v in story.items()]
+    ops.append({"op": "update", "entity": "design", "match": {"key": "main"}, "data": {
+        "purpose": "causal", "design": "cross_sectional", "waves": 1, "sample": "台灣網路購物使用者，線上問卷，預計 300 份。"}})
     store.apply_ops(ops, actor="demo")
     if "literature" in stages:
         store.propose("demo agent", "Literature screening finished: 1 new paper, stage 60% → 75%", [

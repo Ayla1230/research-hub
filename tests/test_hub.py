@@ -785,5 +785,33 @@ class McpTests(unittest.TestCase):
         self.assertEqual(mcp_server.handle(hub, {"jsonrpc": "2.0", "id": 5, "method": "bogus"})["error"]["code"], -32601)
 
 
+
+class DesignTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.store = Store(Path(self.tmp))
+
+    def test_design_row_is_fixed(self):
+        d = self.store.snapshot()["design"]
+        self.assertEqual(d["key"], "main")
+        with self.assertRaises(Exception):
+            self.store.apply_ops([{"op": "create", "entity": "design", "data": {"key": "x"}}])
+        with self.assertRaises(Exception):
+            self.store.apply_ops([{"op": "delete", "entity": "design", "id": d["id"]}])
+        self.store.apply_ops([{"op": "update", "entity": "design", "match": {"key": "main"},
+                               "data": {"purpose": "causal", "design": "longitudinal", "waves": "3", "q1_status": "issue", "q1_note": "n"}}])
+        d = self.store.snapshot()["design"]
+        self.assertEqual((d["purpose"], d["design"], d["waves"], d["q1_status"]), ("causal", "longitudinal", 3, "issue"))
+        with self.assertRaises(Exception):
+            self.store.apply_ops([{"op": "update", "entity": "design", "id": d["id"], "data": {"purpose": "magic"}}])
+
+    def test_variable_design_fields(self):
+        self.store.apply_ops([{"op": "create", "entity": "variable", "data": {
+            "symbol": "C1", "role": "ctrl", "measure_source": "self", "wave": "2", "ctrl_y": True, "rationale": "Becker"}}])
+        v = self.store.snapshot()["variables"][0]
+        self.assertEqual((v["measure_source"], v["wave"], bool(v["ctrl_y"]), bool(v["ctrl_x"]), v["rationale"]), ("self", 2, True, False, "Becker"))
+        with self.assertRaises(Exception):
+            self.store.apply_ops([{"op": "update", "entity": "variable", "id": v["id"], "data": {"measure_source": "nobody"}}])
+
 if __name__ == "__main__":
     unittest.main()
