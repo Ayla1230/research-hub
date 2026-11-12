@@ -228,8 +228,6 @@
       const r = await H.api("/api/exam/seed", { body: {} }); H.toast(L(`已加入 ${r.added} 題`, `${r.added} added`), "ok"); await H.refresh(true);
     }) });
     const toolbar = el("div.toolbar.wrap", null,
-      el("div.seg.small", { role: "radiogroup" }, [["questions", L("考題整理", "Questions")], ["papers", L("文獻整理", "Readings")]].map(([k, l]) =>
-        el("button.seg-btn", { type: "button", role: "radio", "aria-checked": String(ui.examMode === k), dataset: { fkey: "exm-" + k }, onclick: () => go({ examMode: k }) }, l))),
       ui.examMode === "questions" ? el("div.seg.small", { role: "radiogroup" }, [["all", L("全部", "All")], ...Object.keys(KIND).map((k) => [k, pick(KIND, k)])].map(([k, l]) =>
         el("button.seg-btn", { type: "button", role: "radio", "aria-checked": String(ui.examKind === k), dataset: { fkey: "exk-" + k }, onclick: () => go({ examKind: k }) }, l))) : null,
       el("span.grow"), el("label.ci-prov", null, aiBox, el("span", null, "AI")), predictBtn,

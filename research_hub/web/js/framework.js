@@ -375,7 +375,7 @@
         await H.ops(ops, true);
         H.closeLayer();
         H.toast(t("fw_applied"), "ok");
-        H.ui.coreTab = "model"; H.render.core();
+        H.ui.coreTab = "model"; H.ui.section = "core"; H.renderAll(true);
         document.getElementById("core").scrollIntoView({ behavior: "smooth" });
       } catch (e) { H.toast(e.message, "error"); applyBtn.disabled = false; }
     };

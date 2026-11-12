@@ -23,6 +23,8 @@ Data lives in `~/ResearchHub` by default (`--data <folder>` or `RESEARCH_HUB_HOM
 
 ## Features
 
+**Navigation**: the menu button (top left) lists the sections; one section is shown at a time and the top bar lists only that section's sub-options. Settings and language live at the bottom of the menu; press `m` to open it.
+
 | Area | What it does |
 |---|---|
 | **Pipeline nodes** | The dashboard shows the whole study as a row of nodes (01 → 10): topic, literature review, research questions, framework & variables, methodology, data collection, analysis, results, writing, defense & publication. Each node shows a progress ring, status and task count. Stages can be added, renamed, re-ordered and removed to match your department's process chart. |

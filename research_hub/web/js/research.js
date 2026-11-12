@@ -457,6 +457,7 @@
   const TABS = [["story", "tab_story", () => H.storyView()], ["rq", "tab_rq", rqView], ["variables", "tab_vars", variablesView], ["literature", "tab_lit", literatureView],
     ["matrix", "tab_matrix", matrixView], ["model", "tab_model", modelView], ["design", "tab_design", () => H.designView()]];
 
+  H.CORE_TABS = TABS.map(([id, label]) => [id, label]);
   H.render = H.render || {};
   H.render.core = function () {
     const root = document.getElementById("core");

@@ -3,28 +3,101 @@
   const H = window.H;
   const { el, t } = H;
 
+  /* ---------- sections: one at a time, chosen from the side menu ---------- */
+  const SECTIONS = [["home", "nav_home", "home"], ["core", "core", "layers"], ["exam", "exam", "edit"], ["hub", "hub", "plug"], ["activity", "activity", "activity"]];
+  const sectionOf = (hash) => (hash === "pipeline" ? "home" : SECTIONS.some((x) => x[0] === hash) ? hash : "home");
+  H.ui.section = sectionOf(location.hash.slice(1));
+  H.goSection = function (id, opts = {}) {
+    H.ui.section = sectionOf(id);
+    if (opts.coreTab) H.ui.coreTab = opts.coreTab;
+    if (location.hash.slice(1) !== H.ui.section) history.replaceState(null, "", "#" + H.ui.section);
+    closeMenu();
+    H.renderAll(true);
+    window.scrollTo(0, 0);
+  };
+  window.addEventListener("hashchange", () => { const next = sectionOf(location.hash.slice(1)); if (next !== H.ui.section) H.goSection(next); });
+
+  let menuOpener = null;
+  function closeMenu() {
+    const nav = document.getElementById("sidenav");
+    if (!nav) return;
+    nav.remove();
+    document.body.classList.remove("locked");
+    if (menuOpener && document.contains(menuOpener)) menuOpener.focus();
+  }
+  function openMenu() {
+    if (document.getElementById("sidenav")) return closeMenu();
+    menuOpener = document.activeElement;
+    const s = H.state, otherLang = H.lang === "en" ? "zh" : "en";
+    const counts = { core: s.papers.length, exam: s.questions.length };
+    const panel = el("aside.sidenav-panel", { role: "dialog", "aria-modal": "true", "aria-label": t("sections") },
+      el("div.sidenav-head", null, el("img.mark", { src: "/favicon.svg", alt: "", width: 28, height: 28 }), el("span.brand-name", null, "Research Hub"),
+        H.btn(t("close"), { icon: "x", iconOnly: true, variant: "ghost", class: "push", onclick: closeMenu })),
+      el("nav.sidenav-list", { "aria-label": t("sections") }, SECTIONS.map(([id, label, icon]) =>
+        el("button.sidenav-item" + (H.ui.section === id ? ".on" : ""), { type: "button", "aria-current": H.ui.section === id ? "page" : null, onclick: () => H.goSection(id) },
+          H.icon(icon, 18), el("span", null, t(label)), counts[id] ? el("span.mono.muted", null, String(counts[id])) : null))),
+      el("div.sidenav-foot", null,
+        el("button.sidenav-item", { type: "button", onclick: () => { closeMenu(); H.openSettings(); } }, H.icon("settings", 18), el("span", null, t("settings"))),
+        el("a.sidenav-item", { href: "/" + otherLang + "/" + location.hash, hreflang: otherLang,
+          onclick: async (e) => { e.preventDefault(); try { await H.api("/api/settings", { body: { language: otherLang } }); } catch (_) { /* still switch */ } location.href = "/" + otherLang + "/" + location.hash; } },
+          H.icon("globe", 18), el("span", null, otherLang === "en" ? "English" : "中文"))));
+    const nav = el("div#sidenav.sidenav", null, el("div.sidenav-scrim", { onclick: closeMenu }), panel);
+    nav.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.stopPropagation(); closeMenu(); }
+      if (e.key !== "Tab") return;
+      const items = [...panel.querySelectorAll("button, a")];
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    });
+    document.body.append(nav);
+    document.body.classList.add("locked");
+    (panel.querySelector(".sidenav-item.on") || panel.querySelector("button")).focus();
+  }
+
+  /* Sub-options of the section you are in: the only navigation shown in the top bar. */
+  function subnav() {
+    const s = H.state, sec = H.ui.section;
+    const item = (label, on, onclick, count, id) => el("button.subnav-item" + (on ? ".on" : ""), { type: "button", id, "aria-current": on ? "true" : null, onclick },
+      label, count != null ? el("span.count", null, String(count)) : null);
+    if (sec === "core") {
+      const counts = { rq: s.rqs.length, variables: s.variables.length, literature: s.papers.length };
+      return H.CORE_TABS.map(([id, label]) => item(t(label), H.ui.coreTab === id, () => { H.ui.coreTab = id; H.render.core(); topbar(); document.getElementById("nav-" + id)?.focus(); }, counts[id], "nav-" + id));
+    }
+    if (sec === "exam") {
+      const mode = H.ui.examMode || "questions";
+      return [["questions", H.lang === "en" ? "Questions" : "考題整理", s.questions.length], ["papers", H.lang === "en" ? "Readings" : "文獻整理", s.papers.filter((p) => p.folder).length]]
+        .map(([id, label, n]) => item(label, mode === id, () => { H.ui.examMode = id; H.render.exam(); topbar(); document.getElementById("nav-" + id)?.focus(); }, n, "nav-" + id));
+    }
+    if (sec === "home") {
+      return s.stages.map((st) => item(H.stageTitle(st), H.ui.openStage === st.id, () => {
+        H.ui.openStage = H.ui.openStage === st.id ? null : st.id; H.render.pipeline(); topbar();
+        document.getElementById("stage-panel")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }, null, "nav-stage-" + st.id));
+    }
+    return [];
+  }
+
   function topbar() {
     const s = H.state;
     const root = document.getElementById("topbar");
-    const otherLang = H.lang === "en" ? "zh" : "en";
+    document.body.dataset.section = H.ui.section;
+    const current = SECTIONS.find((x) => x[0] === H.ui.section);
+    const subs = subnav();
     H.put(root, el("div.topbar-in", null,
-      el("a.brand", { href: "/" + H.lang + "/", "aria-label": t("app") },
-        el("img.mark", { src: "/favicon.svg", alt: "", width: 28, height: 28 }),
-        el("span.brand-name", null, "Research Hub"), el("span.brand-sub", null, "研究進度中樞")),
-      el("nav.jump", { "aria-label": t("sections") },
-        [["pipeline", t("pipeline")], ["core", t("core")], ["exam", t("exam")], ["hub", t("hub")], ["activity", t("activity")]].map(([id, label]) =>
-          el("a", { href: "#" + id }, label))),
+      el("button.btn.ghost.icon-only.menu-btn", { type: "button", id: "menu-btn", "aria-label": t("sections"), title: t("sections"), "aria-haspopup": "dialog", onclick: openMenu }, H.icon("menu", 20)),
+      el("a.brand", { href: "/" + H.lang + "/", "aria-label": t("app"), onclick: (e) => { e.preventDefault(); H.goSection("home"); } },
+        el("img.mark", { src: "/favicon.svg", alt: "", width: 28, height: 28 }), el("span.brand-name.hide-sm", null, "Research Hub")),
+      el("span.crumb", null, t(current[1])),
       el("div.top-actions", null,
         el("span.live", { id: "live", title: t("live") }, el("i"), el("span", null, t("live"))),
         el("div.mini-progress", { title: t("overall"), "aria-label": `${t("overall")} ${s.overall}%` },
           el("span.mp-bar", null, el("span", { style: { width: s.overall + "%" } })), el("span.mono", null, s.overall + "%")),
         el("button.btn.ghost.inbox-btn" + (s.pending ? ".has" : ""), { type: "button", onclick: H.openInbox, "aria-label": `${t("inbox")} (${s.pending})` },
-          H.icon("inbox", 17), el("span.hide-sm", null, t("inbox")), s.pending ? el("span.badge", null, String(s.pending)) : null),
-        el("a.btn.ghost.lang", { href: "/" + otherLang + "/", hreflang: otherLang, "aria-label": t("language") + ": " + (otherLang === "en" ? "English" : "中文"),
-          onclick: async (e) => { e.preventDefault(); try { await H.api("/api/settings", { body: { language: otherLang } }); } catch (_) { /* still switch */ } location.href = "/" + otherLang + "/"; } },
-          H.icon("globe", 16), el("span", null, otherLang === "en" ? "EN" : "中")),
-        H.btn(t("settings"), { icon: "settings", iconOnly: true, variant: "ghost", onclick: H.openSettings }))));
+          H.icon("inbox", 17), el("span.hide-sm", null, t("inbox")), s.pending ? el("span.badge", null, String(s.pending)) : null))),
+      subs.length ? el("nav.subnav", { "aria-label": t(current[1]) }, el("div.subnav-in", null, subs)) : null);
   }
+  H.renderTop = topbar;
 
   function hero() {
     const s = H.state;
@@ -42,7 +115,7 @@
     });
     const stat = (label, value, extra, onclick) => el(onclick ? "button.stat" : "div.stat", onclick ? { type: "button", onclick } : null,
       el("span.stat-label", null, label), el("span.stat-value", null, value), extra ? el("span.stat-extra", null, extra) : null);
-    const go = (tab) => () => { H.ui.coreTab = tab; H.render.core(); document.getElementById("core").scrollIntoView({ behavior: "smooth" }); };
+    const go = (tab) => () => H.goSection("core", { coreTab: tab });
     H.put(root, el("div.hero-in", null,
       el("div.hero-copy", null,
         el("div.eyebrow", null, el("span.pulse"), t("app"), el("span", null, "/"), t("tagline")),
@@ -152,7 +225,8 @@
 
   document.addEventListener("keydown", (e) => {
     if (e.target.closest("input, textarea, select, [contenteditable]") || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (H.ui.layer) return;
+    if (H.ui.layer || document.getElementById("sidenav")) return;
+    if (e.key === "m") { e.preventDefault(); openMenu(); }
     if (e.key === "i") { e.preventDefault(); H.openInbox(); }
     if (e.key === ",") { e.preventDefault(); H.openSettings(); }
   });
@@ -167,8 +241,6 @@
       }
       foot();
       connect();
-      const hash = location.hash.slice(1);
-      if (hash) document.getElementById(hash)?.scrollIntoView();
     } catch (e) {
       document.getElementById("main").prepend(el("div.fatal", null, H.icon("alert", 18), e.message));
     }
