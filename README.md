@@ -35,6 +35,36 @@ start.cmd             # Windows
 | **即時更新＋使用者確認** | 智能體完成任務、資料夾出現新檔案、PaperRead 同步到新論文或新變數時，變更會先進入「待確認更新」收件匣；使用者逐項勾選、核准後才寫入，確保進度追蹤正確。儀表板透過 Server-Sent Events 即時刷新。 |
 | **動態紀錄與備份** | 每次變更記錄來源（使用者／智能體／資料夾監看）與時間；可匯出完整 JSON 備份與 BibTeX。 |
 
+## 上傳與進度回報（v1.1）
+
+每次上傳檔案都會開啟「上傳與進度回報」視窗（也可從首頁「上傳並回報進度」或各階段的「回報進度」開啟）：
+
+1. **自動歸檔**：依檔名與資料夾名稱判斷所屬階段，例如 `analysis_regression.py` 歸到「資料分析」、`文獻探討_v2.docx` 歸到「文獻探討」。可在設定加入自訂規則（每行 `關鍵字 => 階段代號`），自訂規則優先。
+2. **說明目前進度（必填）**：每次上傳都要寫下這次完成了什麼、卡在哪、下一步是什麼，會記錄在該階段的「進度日誌」。
+3. **進度**：勾選完成的待辦後，進度依待辦完成比例自動計算（可在設定關閉），也可拖動滑桿手動指定。
+4. **完成目標**：設定本階段的目標完成日與完成標準，以及論文最終完成日；首頁會顯示倒數。
+5. **追蹤相關文獻**：送出後在背景搜尋相關新文獻，結果放進「待確認更新」，確認後才加入文獻庫。
+
+**自動追蹤**：有開始與截止日期的階段，會比對「依時間應有的進度」與實際進度，在節點與階段面板標示「落後 N%」或「超前 N%」。
+
+### 文獻來源（免費、每日額度午夜自動重置）
+
+| 來源 | 方式 | 需要金鑰 |
+|---|---|---|
+| OpenAlex | 官方免費 API | 否 |
+| Wiley | 透過 Crossref 免費 API，篩選 Wiley 出版文獻 | 否 |
+| Semantic Scholar | 官方免費 API | 否 |
+| Web of Science | Clarivate Starter API | 是（Clarivate 開發者網站有免費方案，或洽學校圖書館） |
+| Google Scholar | 沒有官方 API，會在新分頁開啟搜尋（不自動抓取，以免違反使用條款） | — |
+
+### AI 助理（選用）
+
+在設定選擇 Google Gemini（免費額度）、Groq、OpenRouter 免費模型、本機 Ollama，或任何相容 OpenAI 格式的服務。AI 只在你按「AI 解讀進度」時呼叫：讀你的進度說明，建議進度百分比、已完成的待辦與檢索關鍵字，由你確認後才送出。金鑰只存在本機，不會顯示或回傳到頁面。
+
+### 每日用量
+
+整合中心的「今日用量」顯示各來源與 AI 今天用了幾次與多少 token、上限，以及距離重置的時間。上限可在設定調整，達到上限時當天會停止呼叫，午夜（本機時間）自動重置。
+
 ## 智能體與 MCP
 
 Research Hub 內建 MCP 伺服器（stdio，標準函式庫實作）。在「整合中心 → MCP 工具與智能體 → 顯示指令」取得含金鑰的設定，例如 Claude Code：
@@ -88,7 +118,7 @@ curl -X POST http://127.0.0.1:8770/api/agent/proposals -H "Authorization: Bearer
 
 ## 設計
 
-視覺設計依 [ui-ux-pro-max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) 的設計系統建議：Minimalism & Swiss Style、IBM Plex Sans + JetBrains Mono（中文 Noto Sans TC）、白色為主調、細線分隔、單一靛藍強調色、等寬小標籤與點陣網格背景；符合其交付檢查清單（SVG 圖示、4.5:1 對比、可見焦點、鍵盤操作、`prefers-reduced-motion`、375–1440px 響應式）。
+圖示是松鼠捧著堅果的剪影（`research_hub/web/favicon.svg`、`squirrel.svg`）。視覺設計依 [ui-ux-pro-max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) 的設計系統建議：Minimalism & Swiss Style、IBM Plex Sans + JetBrains Mono（中文 Noto Sans TC）、白色為主調、細線分隔、單一靛藍強調色、等寬小標籤與點陣網格背景；符合其交付檢查清單（SVG 圖示、4.5:1 對比、可見焦點、鍵盤操作、`prefers-reduced-motion`、375–1440px 響應式）。
 
 ## 開發
 

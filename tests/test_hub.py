@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 from research_hub import demo, integrations as integ, mcp_server  # noqa: E402
 from research_hub.server import App, make_handler  # noqa: E402
-from research_hub.store import Store, ValidationError  # noqa: E402
+from research_hub.store import QuotaError, Store, ValidationError  # noqa: E402
 
 
 class StoreTests(unittest.TestCase):
@@ -213,6 +213,78 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(len(snap["variables"]), 6)
         self.assertEqual(snap["pending"], 1)
         self.assertFalse(demo.apply(self.store))
+
+
+class TrackingTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.store = Store(Path(self.dir))
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_progress_follows_tasks(self):
+        lit = next(s for s in self.store.snapshot()["stages"] if s["key"] == "literature")
+        tasks = [t for t in self.store.snapshot()["tasks"] if t["stage_id"] == lit["id"]]
+        self.assertEqual(len(tasks), 3)
+        self.store.apply_ops([{"op": "update", "entity": "task", "id": tasks[0]["id"], "data": {"done": True}}])
+        stage = self.store.get("stage", lit["id"])
+        self.assertEqual((stage["progress"], stage["status"]), (33, "active"))
+        self.store.apply_ops([{"op": "update", "entity": "task", "id": t["id"], "data": {"done": True}} for t in tasks])
+        stage = self.store.get("stage", lit["id"])
+        self.assertEqual((stage["progress"], stage["status"]), (100, "review"))
+        self.store.apply_ops([{"op": "create", "entity": "task", "data": {"stage_id": lit["id"], "title": "one more"}}])
+        self.assertEqual(self.store.get("stage", lit["id"])["progress"], 75)
+        # a manual slider change in the same batch is respected
+        self.store.apply_ops([{"op": "update", "entity": "stage", "id": lit["id"], "data": {"progress": 40}}])
+        self.assertEqual(self.store.get("stage", lit["id"])["progress"], 40)
+        self.store.save_settings({"auto_progress_from_tasks": False})
+        self.store.apply_ops([{"op": "update", "entity": "task", "id": tasks[0]["id"], "data": {"done": False}}])
+        self.assertEqual(self.store.get("stage", lit["id"])["progress"], 40)
+
+    def test_quota_and_reset_day(self):
+        self.store.save_settings({"quota_semantic": 2})
+        self.store.take_quota("semantic")
+        self.store.take_quota("semantic")
+        with self.assertRaises(QuotaError):
+            self.store.take_quota("semantic")
+        usage = self.store.usage()
+        self.assertEqual(usage["providers"]["semantic"]["requests"], 2)
+        self.assertGreaterEqual(usage["resets_in_minutes"], 0)
+        with self.store.db() as db:  # yesterday's usage does not count today
+            db.execute("UPDATE usage SET day='2000-01-01'")
+        self.store.take_quota("semantic")
+
+    def test_secrets_never_public(self):
+        self.store.save_settings({"ai_api_key": "sk-secret", "wos_api_key": "w", "ai_provider": "groq"})
+        public = self.store.settings(public=True)
+        self.assertNotIn("ai_api_key", public)
+        self.assertTrue(public["ai_api_key_set"] and public["wos_api_key_set"])
+        self.assertNotIn("sk-secret", json.dumps(self.store.snapshot()))
+        for bad in ({"ai_provider": "evil"}, {"watch_providers": ["scholar"]}, {"archive_rules": ["no arrow"]},
+                    {"project_deadline": "soon"}, {"ai_base_url": "file:///etc"}):
+            with self.subTest(bad=bad), self.assertRaises(ValidationError):
+                self.store.save_settings(bad)
+
+    def test_classify(self):
+        stages = self.store.snapshot()["stages"]
+        key = lambda names, rules=None: integ.classify(names, stages, rules)["key"]  # noqa: E731
+        self.assertEqual(key(["analysis/regression.py"]), "analysis")
+        self.assertEqual(key(["文獻探討_v2.docx"]), "literature")
+        self.assertEqual(key(["口試簡報.pptx"]), "defense")
+        self.assertEqual(key(["thesis_chapter3.docx"]), "writing")
+        self.assertIsNone(key(["IMG_0001.jpg"]))
+        self.assertEqual(key(["IMG_0001.jpg"], ["img => data"]), "data")
+
+    def test_ai_config_and_prompt(self):
+        self.assertIsNone(integ.ai_config({"ai_provider": "groq"}))  # no key yet
+        cfg = integ.ai_config({"ai_provider": "groq", "ai_api_key": "k"})
+        self.assertTrue(cfg["base_url"].startswith("https://api.groq.com"))
+        self.assertEqual(integ.ai_config({"ai_provider": "ollama"})["model"], "qwen2.5:7b")
+        self.assertEqual(integ.parse_json_block('noise {"progress": 40, "query": "tam"} tail'), {"progress": 40, "query": "tam"})
+        self.assertEqual(integ.parse_json_block("nothing"), {})
+        q = integ.default_query({"title_en": "Lit"}, "finished screening trust papers", {"variables_en": ["Perceived usefulness"]})
+        self.assertIn("Perceived usefulness", q)
 
 
 class IntegrationTests(unittest.TestCase):
@@ -418,6 +490,100 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.req("/api/upload?stage_id=abc", raw=b"x", headers={"X-Filename": "a.txt"})[0], 400)
         code, body = self.req("/api/upload", raw=b"x", headers={"X-Filename": ".."})
         self.assertEqual(json.loads(body)["name"], "upload.bin")
+
+    def test_checkin(self):
+        stages = self.store.snapshot()["stages"]
+        stage = next(s for s in stages if s["key"] == "analysis")
+        code, body = self.req("/api/upload", raw=b"print(1)", headers={"X-Filename": "analysis_regression.py"})
+        fid = json.loads(body)["id"]
+        code, body = self.req("/api/classify", {"names": ["analysis_regression.py"]})
+        self.assertEqual(json.loads(body)["stage_id"], stage["id"])
+        self.assertEqual(self.req("/api/checkin", {"stage_id": stage["id"], "note": "  "})[0], 400)
+        task = next(t for t in self.store.snapshot()["tasks"] if t["stage_id"] == stage["id"])
+        code, body = self.req("/api/checkin", {"stage_id": stage["id"], "note": "cleaned the data", "file_ids": [fid],
+                                               "done_task_ids": [task["id"]], "due_date": "2027-01-31", "goal": "all hypotheses tested",
+                                               "project_deadline": "2027-06-30"})
+        self.assertEqual(code, 200, body)
+        after = self.store.get("stage", stage["id"])
+        self.assertEqual((after["status"], after["progress"], after["due_date"], after["goal"]), ("active", 33, "2027-01-31", "all hypotheses tested"))
+        self.assertEqual(self.store.get("file", fid)["stage_id"], stage["id"])
+        log = self.store.snapshot()["updates"][0]
+        self.assertEqual((log["note"], log["progress_before"], log["progress_after"]), ("cleaned the data", 0, 33))
+        self.assertEqual(self.store.settings()["project_deadline"], "2027-06-30")
+        code, body = self.req("/api/checkin", {"stage_id": stage["id"], "note": "more", "progress": 70})
+        self.assertEqual(self.store.get("stage", stage["id"])["progress"], 70)
+        code, body = self.req("/api/usage")
+        self.assertIn("openalex", json.loads(body)["providers"])
+        self.assertEqual(self.req("/api/ai/suggest", {"stage_id": stage["id"], "note": "x"})[0], 400)
+
+    def test_literature_watch(self):
+        original = integ.search
+        calls = []
+
+        def fake(provider, query, settings, **kw):
+            calls.append(provider)
+            if provider == "wos":
+                raise ValueError("no key")
+            return [{"title": f"{provider} paper on {query}", "authors": "A", "year": 2025, "doi": f"10.1/{provider}", "provider": provider},
+                    {"title": "Shared paper", "doi": "10.1/shared", "provider": provider}]
+
+        integ.search = fake
+        try:
+            stage = self.store.snapshot()["stages"][1]
+            before = len(self.store.list_proposals())
+            prop = self.app.literature_watch(stage, "trust", ["openalex", "wiley", "wos"], "note")
+            self.assertEqual(calls, ["openalex", "wiley", "wos"])
+            pending = self.store.list_proposals()
+            self.assertEqual(len(pending), before + 1)
+            titles = [o["data"]["title"] for o in pending[0]["ops"]]
+            self.assertEqual(sorted(titles), ["Shared paper", "openalex paper on trust", "wiley paper on trust"])  # deduped
+            self.assertTrue(all(o["data"]["status"] == "candidate" for o in pending[0]["ops"]))
+            self.store.decide(prop["id"], False)
+        finally:
+            integ.search = original
+
+    def test_ai_suggest_with_fake_provider(self):
+        from http.server import BaseHTTPRequestHandler
+
+        seen = {}
+
+        class Fake(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                seen["auth"] = self.headers.get("Authorization")
+                seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                stage_tasks = [t for t in ServerTests.store.snapshot()["tasks"] if t["stage_id"] == 3]
+                reply = {"choices": [{"message": {"content": "Sure: " + json.dumps({
+                    "progress": 55, "done_task_ids": [stage_tasks[0]["id"], 99999], "query": "trust adoption", "summary": "過半"})}}],
+                    "usage": {"total_tokens": 321}}
+                data = json.dumps(reply).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        fake = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
+        threading.Thread(target=fake.serve_forever, daemon=True).start()
+        try:
+            self.store.save_settings({"ai_provider": "custom", "ai_base_url": f"http://127.0.0.1:{fake.server_address[1]}/v1",
+                                      "ai_model": "test-model", "ai_api_key": "sk-test", "quota_ai": 1})
+            code, body = self.req("/api/ai/suggest", {"stage_id": 3, "note": "screened 40 papers", "files": ["lit.docx"]})
+            self.assertEqual(code, 200, body)
+            out = json.loads(body)
+            self.assertEqual((out["progress"], out["query"], out["tokens"]), (55, "trust adoption", 321))
+            self.assertNotIn(99999, out["done_task_ids"])  # invented ids are dropped
+            self.assertEqual(seen["auth"], "Bearer sk-test")
+            self.assertEqual(seen["body"]["model"], "test-model")
+            self.assertEqual(self.store.usage()["providers"]["ai"]["tokens"], 321)
+            code, body = self.req("/api/ai/suggest", {"stage_id": 3, "note": "again"})
+            self.assertEqual(code, 429)  # daily quota of 1 used up
+        finally:
+            fake.shutdown()
+            fake.server_close()
+            self.store.save_settings({"ai_provider": "", "ai_api_key": ""})
 
     def test_script_run_disabled_by_default(self):
         code, body = self.req("/api/scripts/run", {"path": "/tmp/x.py"})

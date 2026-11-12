@@ -9,7 +9,7 @@
     const otherLang = H.lang === "en" ? "zh" : "en";
     H.put(root, el("div.topbar-in", null,
       el("a.brand", { href: "/" + H.lang + "/", "aria-label": t("app") },
-        el("span.mark", { "aria-hidden": "true" }, el("i"), el("i"), el("i")),
+        el("img.mark", { src: "/favicon.svg", alt: "", width: 28, height: 28 }),
         el("span.brand-name", null, "Research Hub"), el("span.brand-sub", null, "研究進度中樞")),
       el("nav.jump", { "aria-label": t("sections") },
         [["pipeline", t("pipeline")], ["core", t("core")], ["hub", t("hub")], ["activity", t("activity")]].map(([id, label]) =>
@@ -47,9 +47,19 @@
       el("div.hero-copy", null,
         el("div.eyebrow", null, el("span.pulse"), t("app"), el("span", null, "/"), t("tagline")),
         title,
+        el("div.hero-cta", null,
+          H.btn(t("ci_hero"), { icon: "upload", variant: "primary", onclick: () => H.openCheckin({}) }),
+          el("span.muted.sm", null, t("ci_hero_hint"))),
         el("div.hero-now", null,
           current ? el("button.now-chip", { type: "button", onclick: () => { H.ui.openStage = current.id; H.render.pipeline(); document.getElementById("stage-panel")?.scrollIntoView({ behavior: "smooth", block: "nearest" }); } },
             el("span.lbl", null, t("current")), el("span.dot." + current.status), H.stageTitle(current), el("span.mono", null, (current.status === "done" ? 100 : current.progress) + "%")) : null,
+          (() => {
+            const dl = s.settings.project_deadline;
+            const n = dl ? H.daysUntil(dl) : null;
+            return el("button.now-chip.goal", { type: "button", onclick: H.openSettings, title: s.settings.project_goal || "" },
+              H.icon("flag", 14), el("span.lbl", null, t("final_goal")),
+              dl ? `${dl} · ${n < 0 ? t("overdue") : t("days_left", { n })}` : t("set_goal"));
+          })(),
           el("span.now-chip.static", null, el("span.lbl", null, t("next_due")), upcoming ? `${H.stageTitle(upcoming)} · ${upcoming.due_date}` : t("none_due"),
             upcoming && H.dueLabel(upcoming.due_date)?.kind === "late" ? el("span.pill.late", null, t("overdue")) : null))),
       el("div.hero-stats", null,
@@ -131,6 +141,7 @@
         if (H.ui.layer === "inbox") H.loadInbox();
       }
       if (ev.type === "run") H.onRun && H.onRun();
+      if (ev.entity === "usage") { H.loadUsage && H.loadUsage(); return; }
       softRefresh();
     };
     es.onerror = () => { document.getElementById("live")?.classList.add("off"); };

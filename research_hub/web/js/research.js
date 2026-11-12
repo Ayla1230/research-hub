@@ -215,7 +215,7 @@
   }
 
   /* ================= Literature ================= */
-  let searchResults = null, searchBusy = false, searchQuery = "", searchYear = "";
+  let searchResults = null, searchBusy = false, searchQuery = "", searchYear = "", searchProvider = "openalex";
   function openalexPanel() {
     const q = H.input(searchQuery, { placeholder: t("search_ph"), "aria-label": t("search_ph"), type: "search" });
     const y = H.input(searchYear, { type: "number", placeholder: t("year_from"), "aria-label": t("year_from"), class: "year", min: 1900, max: 2100 });
@@ -224,7 +224,7 @@
       searchQuery = q.value.trim(); searchYear = y.value;
       if (!searchQuery) return;
       searchBusy = true; H.render.core();
-      try { searchResults = (await H.api(`/api/search/openalex?q=${encodeURIComponent(searchQuery)}&year_from=${encodeURIComponent(searchYear || "")}`)).results; }
+      try { searchResults = (await H.api(`/api/search?provider=${searchProvider}&q=${encodeURIComponent(searchQuery)}&year_from=${encodeURIComponent(searchYear || "")}`)).results; H.loadUsage && H.loadUsage(); }
       catch (err) { searchResults = null; H.toast(err.message, "error"); }
       searchBusy = false; H.render.core();
       document.querySelector(".oa-form input")?.focus();
@@ -233,6 +233,8 @@
     const knownOa = new Set(H.state.papers.map((p) => p.openalex_id).filter(Boolean));
     return el("div.oa", null,
       el("form.oa-form", { onsubmit: go }, H.icon("search", 16), q, y,
+        H.select(searchProvider, [["openalex", "OpenAlex"], ["wiley", "Wiley"], ["semantic", "Semantic Scholar"],
+          ...(H.state.settings.wos_api_key_set ? [["wos", "Web of Science"]] : [])], { class: "sm prov-sel", "aria-label": t("source"), onchange: (e) => { searchProvider = e.target.value; } }),
         H.btn(searchBusy ? t("searching") : t("search"), { type: "submit", variant: "primary", small: true, disabled: searchBusy })),
       searchResults ? el("ul.oa-results", null, searchResults.length ? searchResults.map((r) => {
         const have = (r.doi && known.has(r.doi.toLowerCase())) || (r.openalex_id && knownOa.has(r.openalex_id));
@@ -242,7 +244,7 @@
               r.cited_by ? el("span.mono.muted", null, " · " + t("cited_by", { n: r.cited_by })) : null)),
           H.btn(have ? t("added") : t("add_to_library"), { icon: have ? "check" : "plus", small: true, variant: have ? "ghost" : "outline", disabled: have,
             onclick: () => H.ops([{ op: "create", entity: "paper", data: { title: r.title, authors: r.authors, year: r.year, venue: r.venue, doi: r.doi, url: r.url,
-              abstract: r.abstract, openalex_id: r.openalex_id, source: "openalex", status: "candidate" } }]) }));
+              abstract: r.abstract, openalex_id: r.openalex_id || "", source: r.provider || "openalex", status: "candidate" } }]) }));
       }) : el("li.empty.sm", null, t("no_results")))
         : null);
   }
@@ -279,7 +281,7 @@
           H.btn(t("import_bib"), { icon: "upload", variant: "ghost", small: true, onclick: () => bibInput.click() }), bibInput,
           H.btn(t("export_bib"), { icon: "download", variant: "ghost", small: true, onclick: () => exportBib() }),
           H.btn(t("add_paper"), { icon: "plus", variant: "primary", small: true, onclick: () => H.editPaper(null) }))),
-      el("details.oa-wrap", { open: !!searchResults || searchBusy || null }, el("summary", null, H.icon("search", 15), t("search_openalex"), el("span.mono.muted", null, "api.openalex.org")), openalexPanel()),
+      el("details.oa-wrap", { open: !!searchResults || searchBusy || null }, el("summary", null, H.icon("search", 15), t("search_openalex"), el("span.mono.muted", null, "OpenAlex · Wiley · Semantic Scholar · WoS")), openalexPanel()),
       table);
   }
 

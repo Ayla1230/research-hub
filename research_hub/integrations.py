@@ -497,3 +497,193 @@ class Runner:
             run["state"] = "failed"
         run["ended"] = time.time()
         on_done(run)
+
+
+# ---------------------------------------------------------------- auto-archive
+def classify(names: list[str], stages: list[dict], rules: list[str] | None = None) -> dict:
+    """Pick the pipeline stage a set of uploaded/added files belongs to, from words in
+    their names or folders. Custom "keyword => stage_key" rules win over built-ins.
+    Returns {"stage_id", "key", "matched": [...]} or {"stage_id": None} when nothing matches."""
+    from .defaults import STAGE_KEYWORDS
+
+    by_key = {s["key"]: s for s in stages if s.get("key")}
+    table: list[tuple[str, str, int]] = []
+    for line in rules or []:
+        if "=>" in line:
+            word, key = (x.strip() for x in line.split("=>", 1))
+            if word and key in by_key:
+                table.append((word.casefold(), key, 3))
+    for key, words in STAGE_KEYWORDS.items():
+        if key in by_key:
+            table += [(w.casefold(), key, 1) for w in words]
+    scores: dict[str, int] = {}
+    matched: dict[str, list[str]] = {}
+    for name in names:
+        text = str(name).replace("\\", "/").casefold()
+        ext = Path(text).suffix
+        for word, key, weight in table:
+            hit = (ext == word) if word.startswith(".") else (word in text)
+            if hit:
+                scores[key] = scores.get(key, 0) + weight
+                matched.setdefault(key, []).append(word)
+    if not scores:
+        return {"stage_id": None, "key": None, "matched": []}
+    order = {s["key"]: i for i, s in enumerate(stages)}
+    best = max(scores, key=lambda k: (scores[k], -order.get(k, 99)))
+    return {"stage_id": by_key[best]["id"], "key": best, "matched": sorted(set(matched[best]))}
+
+
+# ---------------------------------------------------------------- more literature sources
+def _get_json(url: str, headers: dict | None = None, timeout: int = 20):
+    req = urllib.request.Request(url, headers={"User-Agent": "research-hub/1.1", "Accept": "application/json", **(headers or {})})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _strip_tags(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text or "")).strip()
+
+
+def crossref_search(query: str, *, year_from: int = 0, limit: int = 20, publisher_member: str = "311", mailto: str = "") -> list[dict]:
+    """Crossref works search, filtered to one publisher (311 = Wiley). Free, no key."""
+    filters = [f"member:{publisher_member}"] if publisher_member else []
+    if year_from:
+        filters.append(f"from-pub-date:{int(year_from)}")
+    params = {"query": query, "rows": str(max(1, min(limit, 50))),
+              "select": "DOI,title,author,issued,container-title,URL,abstract,is-referenced-by-count"}
+    if filters:
+        params["filter"] = ",".join(filters)
+    if mailto:
+        params["mailto"] = mailto
+    data = _get_json("https://api.crossref.org/works?" + urllib.parse.urlencode(params))
+    out = []
+    for w in (data.get("message") or {}).get("items", []):
+        authors = " ; ".join(", ".join(x for x in (a.get("family"), a.get("given")) if x) for a in (w.get("author") or [])[:12])
+        parts = ((w.get("issued") or {}).get("date-parts") or [[0]])[0]
+        out.append({"title": _strip_tags((w.get("title") or [""])[0]), "authors": authors, "year": int(parts[0] or 0) if parts else 0,
+                    "venue": (w.get("container-title") or [""])[0], "doi": w.get("DOI", ""), "url": w.get("URL", ""),
+                    "abstract": _strip_tags(w.get("abstract", ""))[:4000], "cited_by": w.get("is-referenced-by-count", 0)})
+    return [r for r in out if r["title"]]
+
+
+def semantic_search(query: str, *, year_from: int = 0, limit: int = 20) -> list[dict]:
+    """Semantic Scholar Graph API search. Free, no key (shared rate limit)."""
+    params = {"query": query, "limit": str(max(1, min(limit, 50))),
+              "fields": "title,authors,year,venue,externalIds,abstract,url,citationCount"}
+    if year_from:
+        params["year"] = f"{int(year_from)}-"
+    data = _get_json("https://api.semanticscholar.org/graph/v1/paper/search?" + urllib.parse.urlencode(params))
+    out = []
+    for w in data.get("data") or []:
+        ids = w.get("externalIds") or {}
+        out.append({"title": w.get("title") or "", "authors": " ; ".join(a.get("name", "") for a in (w.get("authors") or [])[:12]),
+                    "year": w.get("year") or 0, "venue": w.get("venue") or "", "doi": ids.get("DOI", "") or "",
+                    "url": w.get("url") or "", "abstract": (w.get("abstract") or "")[:4000], "cited_by": w.get("citationCount") or 0})
+    return [r for r in out if r["title"]]
+
+
+def wos_search(query: str, api_key: str, *, year_from: int = 0, limit: int = 20) -> list[dict]:
+    """Clarivate Web of Science Starter API (needs a free/institutional API key)."""
+    if not api_key:
+        raise ValueError("Web of Science needs an API key (Settings → literature sources)")
+    q = f"TS=({query})" + (f" AND PY=({int(year_from)}-2100)" if year_from else "")
+    params = {"q": q, "limit": str(max(1, min(limit, 50))), "db": "WOS"}
+    data = _get_json("https://api.clarivate.com/apis/wos-starter/v1/documents?" + urllib.parse.urlencode(params), {"X-ApiKey": api_key})
+    out = []
+    for w in data.get("hits") or []:
+        src = w.get("source") or {}
+        names = ((w.get("names") or {}).get("authors") or [])[:12]
+        ids = w.get("identifiers") or {}
+        out.append({"title": w.get("title") or "", "authors": " ; ".join(a.get("displayName") or a.get("wosStandard") or "" for a in names),
+                    "year": int(src.get("publishYear") or 0), "venue": src.get("sourceTitle") or "", "doi": ids.get("doi") or "",
+                    "url": (w.get("links") or {}).get("record") or "", "abstract": "", "cited_by": 0})
+    return [r for r in out if r["title"]]
+
+
+def search(provider: str, query: str, settings: dict, *, year_from: int = 0, limit: int = 20) -> list[dict]:
+    """One entry point for every automatic literature source."""
+    if provider == "openalex":
+        results = openalex_search(query, year_from=year_from, limit=limit, mailto=settings.get("openalex_mailto", ""))
+    elif provider == "wiley":
+        results = crossref_search(query, year_from=year_from, limit=limit, mailto=settings.get("openalex_mailto", ""))
+    elif provider == "semantic":
+        results = semantic_search(query, year_from=year_from, limit=limit)
+    elif provider == "wos":
+        results = wos_search(query, settings.get("wos_api_key", ""), year_from=year_from, limit=limit)
+    else:
+        raise ValueError(f"unknown literature source {provider}")
+    for r in results:
+        r["provider"] = provider
+    return results
+
+
+# ---------------------------------------------------------------- optional AI assistant
+def ai_config(settings: dict) -> dict | None:
+    from .defaults import AI_PRESETS
+
+    provider = settings.get("ai_provider") or ""
+    if not provider:
+        return None
+    preset = AI_PRESETS.get(provider, {})
+    base = (settings.get("ai_base_url") or preset.get("base_url") or "").rstrip("/")
+    model = settings.get("ai_model") or preset.get("model") or ""
+    if not base or not model:
+        return None
+    if provider != "ollama" and not settings.get("ai_api_key"):
+        return None
+    return {"provider": provider, "base_url": base, "model": model, "key": settings.get("ai_api_key", "")}
+
+
+def ai_chat(cfg: dict, system: str, user: str, *, timeout: int = 60) -> tuple[str, int]:
+    """One chat completion against an OpenAI-compatible endpoint. Returns (text, tokens used)."""
+    body = json.dumps({"model": cfg["model"], "temperature": 0.2,
+                       "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}).encode("utf-8")
+    headers = {"Content-Type": "application/json", "User-Agent": "research-hub/1.1"}
+    if cfg.get("key"):
+        headers["Authorization"] = f"Bearer {cfg['key']}"
+    req = urllib.request.Request(cfg["base_url"] + "/chat/completions", data=body, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+    tokens = int((data.get("usage") or {}).get("total_tokens") or (len(system) + len(user) + len(text)) // 3)
+    return text, tokens
+
+
+def parse_json_block(text: str) -> dict:
+    m = re.search(r"\{.*\}", text or "", re.S)
+    if not m:
+        return {}
+    try:
+        data = json.loads(m.group(0))
+    except ValueError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def checkin_prompt(stage: dict, tasks: list[dict], note: str, files: list[str], context: dict) -> tuple[str, str]:
+    system = ("You help a graduate student track thesis progress. Read their progress note and the files they uploaded, "
+              "then reply with ONE JSON object only: {\"progress\": 0-100 integer for this stage, "
+              "\"done_task_ids\": [ids of listed tasks the note shows are finished], "
+              "\"query\": \"4-8 English keywords for finding related recent papers\", "
+              "\"summary\": \"one sentence, in the language of the note, saying where the stage stands\"}. "
+              "Never invent task ids. Be conservative with progress.")
+    lines = [f"Stage: {stage.get('title_zh')} / {stage.get('title_en')} (current progress {stage.get('progress')}%)",
+             f"Stage goal: {stage.get('goal') or '-'}", "Tasks:"]
+    lines += [f"  [{ 'x' if t['done'] else ' ' }] id={t['id']} {t['title']}" for t in tasks] or ["  (none)"]
+    lines += [f"Uploaded files: {', '.join(files) or '-'}", f"Project: {context.get('title', '')}",
+              f"Research questions: {'; '.join(context.get('rqs', [])) or '-'}",
+              f"Variables: {', '.join(context.get('variables', [])) or '-'}", "", "Progress note:", note]
+    return system, "\n".join(lines)
+
+
+def default_query(stage: dict, note: str, context: dict) -> str:
+    """Keywords for literature tracking when no AI is configured: English variable names,
+    then English words from the note, then the stage title."""
+    words = [v for v in context.get("variables_en", []) if v][:4]
+    if len(words) < 3:
+        latin = re.findall(r"[A-Za-z][A-Za-z\-]{3,}", note or "")
+        stop = {"this", "that", "with", "from", "have", "been", "will", "into", "about", "draft", "done", "chapter"}
+        words += [w for w in latin if w.casefold() not in stop][: 6 - len(words)]
+    if not words and context.get("title"):
+        words = [w for w in re.findall(r"[A-Za-z][A-Za-z\-]{2,}", context["title"]) if w.casefold() != "research"]
+    return " ".join(dict.fromkeys(words))[:200] or (stage.get("title_en") or "")

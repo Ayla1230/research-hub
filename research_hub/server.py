@@ -27,7 +27,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from . import __version__, integrations as integ
-from .store import ENTITIES, Store, ValidationError
+from .store import ENTITIES, QuotaError, Store, ValidationError
 
 WEB = Path(__file__).with_name("web")
 MAX_UPLOAD = 300 * 1024 * 1024
@@ -82,6 +82,44 @@ class App:
                 return None  # not marked seen: offered again on the next scan
         self.store.mark_seen([f["path"] for f in fresh])
         return result
+
+    def context(self) -> dict:
+        snap = self.store.snapshot()
+        return {"title": snap["settings"].get("project_title", ""),
+                "rqs": [f"{r['code']}: {r['text']}" for r in snap["rqs"]][:8],
+                "variables": [f"{v['symbol']} {v['name_en'] or v['name_zh']} ({v['role']})" for v in snap["variables"]][:20],
+                "variables_en": [v["name_en"] for v in snap["variables"] if v["name_en"]]}
+
+    def search_counted(self, provider: str, query: str, *, year_from: int = 0, limit: int = 20) -> list[dict]:
+        self.store.take_quota(provider)
+        return integ.search(provider, query, self.store.settings(), year_from=year_from, limit=limit)
+
+    def literature_watch(self, stage: dict, query: str, providers: list[str], note: str) -> dict | None:
+        """Search the chosen free sources for papers related to a check-in and queue the
+        ones not yet in the library as one proposal (the user decides what to keep)."""
+        found, errors = [], []
+        for provider in providers:
+            try:
+                found += self.search_counted(provider, query, limit=10)
+            except QuotaError as e:
+                errors.append(str(e))
+            except Exception as e:  # network/API failure of one source must not stop the others
+                errors.append(f"{provider}: {e}")
+        entries, _ = integ.dedupe([{k: r.get(k, "") for k in ("title", "authors", "year", "venue", "doi", "url", "abstract")}
+                                   | {"source": r["provider"]} for r in found], self.store.snapshot()["papers"])
+        zh = self.store.settings().get("language") != "en"
+        if errors:
+            self.store.log("literature-watch", "error", "; ".join(errors)[:300])
+        if not entries:
+            return None
+        title = (f"「{stage['title_zh']}」相關新文獻 {len(entries)} 篇" if zh
+                 else f"{len(entries)} new paper(s) related to “{stage['title_en'] or stage['title_zh']}”")
+        summary = (f"檢索：{query}（{', '.join(providers)}）\n依據進度說明：{note[:300]}" if zh
+                   else f"Query: {query} ({', '.join(providers)})\nFrom the progress note: {note[:300]}")
+        ops = [{"op": "create", "entity": "paper", "data": {**e, "status": "candidate", "year": int(e.get("year") or 0),
+                                                            "notes": f"literature watch · {stage['key'] or stage['title_en']}"}}
+               for e in entries[:30]]
+        return self.store.propose("literature-watch", title, ops, summary)
 
     def watch_loop(self, interval: float = 30.0) -> None:
         while not self.stop.wait(interval):
@@ -238,6 +276,8 @@ def make_handler(app: App):
             path, qs = url.path, parse_qs(url.query)
             try:
                 return self._get(path, qs)
+            except QuotaError as e:
+                return self._error(429, str(e))
             except ValidationError as e:
                 return self._error(400, str(e))
             except Exception as e:  # pragma: no cover - surfaced to the UI
@@ -256,6 +296,8 @@ def make_handler(app: App):
                 if not self._user_ok():
                     return self._error(403, "missing or invalid page token; reload the dashboard")
                 return self._post(path, qs)
+            except QuotaError as e:
+                return self._error(429, str(e))
             except ValidationError as e:
                 return self._error(400, str(e))
             except Exception as e:  # pragma: no cover
@@ -318,6 +360,25 @@ def make_handler(app: App):
                 return self._json(200, {"scripts": integ.list_scripts(settings.get("code_dir", "")),
                                         "runs": app.runner.runs, "allow_run": bool(settings.get("allow_code_run")),
                                         "code_dir": settings.get("code_dir", "")})
+            if path == "/api/usage":
+                data = store.usage()
+                data["ai"] = bool(integ.ai_config(store.settings()))
+                return self._json(200, data)
+            if path == "/api/search":
+                provider = q1("provider", "openalex")
+                try:
+                    year = int(q1("year_from", "0") or 0)
+                except ValueError:
+                    year = 0
+                try:
+                    results = app.search_counted(provider, q1("q"), year_from=year)
+                except QuotaError:
+                    raise
+                except ValueError as e:
+                    raise ValidationError(str(e)) from None
+                except Exception as e:
+                    return self._error(502, f"{provider} unavailable: {e}")
+                return self._json(200, {"results": results})
             if path == "/api/search/openalex":
                 settings = store.settings()
                 try:
@@ -325,7 +386,9 @@ def make_handler(app: App):
                 except ValueError:
                     year = 0
                 try:
-                    results = integ.openalex_search(q1("q"), year_from=year, mailto=settings.get("openalex_mailto", ""))
+                    results = app.search_counted("openalex", q1("q"), year_from=year)
+                except QuotaError:
+                    raise
                 except Exception as e:
                     return self._error(502, f"OpenAlex unavailable: {e}")
                 return self._json(200, {"results": results})
@@ -451,6 +514,38 @@ def make_handler(app: App):
                     store.apply_ops([{"op": "create", "entity": "paper", "data": e} for e in entries], actor="user")
                 store.mark_seen([f["path"] for f in files])
                 return self._json(200, {"imported": len(entries), "skipped": skipped})
+            if path == "/api/classify":
+                names = [str(n)[:300] for n in (self._payload().get("names") or [])][:200]
+                return self._json(200, integ.classify(names, store.snapshot()["stages"], store.settings().get("archive_rules")))
+            if path == "/api/ai/suggest":
+                data = self._payload()
+                cfg = integ.ai_config(store.settings())
+                if not cfg:
+                    raise ValidationError("AI assistant is not set up — choose a provider and key in Settings")
+                stage = store.get("stage", int(data.get("stage_id") or 0))
+                if not stage:
+                    raise ValidationError("unknown stage")
+                tasks = [t for t in store.snapshot()["tasks"] if t["stage_id"] == stage["id"]]
+                system, user = integ.checkin_prompt(stage, tasks, str(data.get("note") or "")[:4000],
+                                                    [str(n)[:200] for n in data.get("files") or []][:30], app.context())
+                store.take_quota("ai")
+                try:
+                    text, tokens = integ.ai_chat(cfg, system, user)
+                except Exception as e:
+                    return self._error(502, f"AI service unavailable: {e}")
+                store.add_tokens("ai", tokens)
+                out = integ.parse_json_block(text)
+                ids = {t["id"] for t in tasks}
+                try:
+                    progress = max(0, min(100, int(out.get("progress"))))
+                except (TypeError, ValueError):
+                    progress = None
+                return self._json(200, {"progress": progress,
+                                        "done_task_ids": [i for i in out.get("done_task_ids") or [] if isinstance(i, int) and i in ids],
+                                        "query": str(out.get("query") or "")[:200], "summary": str(out.get("summary") or "")[:500],
+                                        "tokens": tokens})
+            if path == "/api/checkin":
+                return self._json(200, self._checkin(self._payload()))
             if path == "/api/watch/scan":
                 result = app.watch_once()
                 return self._json(200, {"proposal": result})
@@ -515,6 +610,73 @@ def make_handler(app: App):
                     raise ValidationError(f"cannot open the file manager here: {e}") from None
                 return self._json(200, {"ok": True})
             return self._error(404, "not found")
+
+        # ---------------------------------------------------------- check-in
+        def _checkin(self, data: dict) -> dict:
+            """Upload check-in: the user says where the stage stands (required), may set the
+            progress, tick tasks, set the goal and deadline; everything is applied at once and
+            logged. Related-literature tracking runs in the background and lands in the inbox."""
+            note = str(data.get("note") or "").strip()
+            if not note:
+                raise ValidationError("please describe where this stage stands")
+            try:
+                stage_id = int(data.get("stage_id") or 0)
+            except (TypeError, ValueError):
+                raise ValidationError("unknown stage") from None
+            stage = store.get("stage", stage_id)
+            if not stage:
+                raise ValidationError("unknown stage")
+            file_ids = [int(i) for i in data.get("file_ids") or [] if str(i).isdigit()][:100]
+            files = [store.get("file", i) for i in file_ids]
+            if any(f is None for f in files):
+                raise ValidationError("unknown file")
+            ops: list[dict] = []
+            patch: dict = {}
+            if data.get("due_date") is not None:
+                patch["due_date"] = str(data["due_date"])
+            if data.get("goal") is not None:
+                patch["goal"] = str(data["goal"])
+            if stage["status"] == "todo":
+                patch["status"] = "active"
+                if not stage["start_date"]:
+                    patch["start_date"] = time.strftime("%Y-%m-%d")
+            for tid in data.get("done_task_ids") or []:
+                ops.append({"op": "update", "entity": "task", "id": int(tid), "data": {"done": True}})
+            for f in files:  # auto-archive: attach the uploaded files to the chosen stage
+                if f["stage_id"] != stage_id:
+                    ops.append({"op": "update", "entity": "file", "id": f["id"], "data": {"stage_id": stage_id}})
+            if patch:
+                ops.insert(0, {"op": "update", "entity": "stage", "id": stage_id, "data": patch})
+            if ops:
+                store.apply_ops(ops, actor="user", allow_internal=True)
+            # explicit progress wins over the task-derived value, so apply it last
+            if data.get("progress") not in (None, ""):
+                progress = max(0, min(100, int(data["progress"])))
+                if progress != store.get("stage", stage_id)["progress"]:
+                    extra = {"status": "review"} if progress == 100 and store.get("stage", stage_id)["status"] != "done" else {}
+                    store.apply_ops([{"op": "update", "entity": "stage", "id": stage_id, "data": {"progress": progress, **extra}}], actor="user")
+            if data.get("project_deadline"):
+                store.save_settings({"project_deadline": str(data["project_deadline"])})
+            after = store.get("stage", stage_id)
+            store.apply_ops([{"op": "create", "entity": "update", "data": {
+                "stage_id": stage_id, "note": note, "progress_before": stage["progress"],
+                "progress_after": 100 if after["status"] == "done" else after["progress"],
+                "files": json.dumps([f["name"] for f in files], ensure_ascii=False), "source": "check-in"}}],
+                actor="user", allow_internal=True)
+            search = data.get("search") or {}
+            providers = [p for p in search.get("providers") or [] if p in ("openalex", "wiley", "semantic", "wos")]
+            query = str(search.get("query") or "").strip()[:200]
+            started = False
+            if providers and query:
+                threading.Thread(target=self._watch_safe, args=(after, query, providers, note), daemon=True).start()
+                started = True
+            return {"ok": True, "stage": after, "search_started": started}
+
+        def _watch_safe(self, stage, query, providers, note):
+            try:
+                app.literature_watch(stage, query, providers, note)
+            except Exception as e:  # pragma: no cover - logged for the user
+                store.log("literature-watch", "error", str(e)[:300])
 
         # ---------------------------------------------------------- agent API
         def _agent_get(self, path: str, qs: dict):

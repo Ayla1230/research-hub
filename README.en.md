@@ -35,6 +35,36 @@ Data lives in `~/ResearchHub` by default (`--data <folder>` or `RESEARCH_HUB_HOM
 | **Live updates + confirmation** | When an agent finishes a task, a new file appears in a watched folder, or a PaperRead sync finds new papers or variables, the change waits in the **Inbox**. You approve it (optionally only some of its changes) before anything is written. The dashboard refreshes live over Server-Sent Events. |
 | **Activity & backup** | Every change records who made it (you, an agent, the folder watcher) and when; export a full JSON backup or BibTeX. |
 
+## Upload & progress check-in (v1.1)
+
+Every upload opens an **Upload & progress check-in** dialog (also available from the hero button and each stage's "Report progress"):
+
+1. **Auto-archive**: the stage is picked from the file and folder names (`analysis_regression.py` goes to Data Analysis, `文獻探討_v2.docx` to Literature Review). Add your own `keyword => stage key` rules in Settings; they take priority.
+2. **Where are you? (required)**: every upload records what you finished, what is blocking you and what comes next, in the stage's **Progress log**.
+3. **Progress**: ticking finished tasks recalculates progress from the checklist (can be turned off), or set it with the slider.
+4. **Completion goal**: the stage's target date and definition of done, plus the thesis deadline, shown as a countdown on the dashboard.
+5. **Track related literature**: after saving, related new papers are searched in the background and land in the Inbox for approval.
+
+**Automatic tracking**: stages with start and due dates compare actual progress with the progress expected by today and show "N% behind" or "N% ahead" on the node and in the stage panel.
+
+### Literature sources (free; daily quotas reset at local midnight)
+
+| Source | How | Key needed |
+|---|---|---|
+| OpenAlex | free official API | no |
+| Wiley | free Crossref API filtered to Wiley publications | no |
+| Semantic Scholar | free official API | no |
+| Web of Science | Clarivate Starter API | yes (free plan on the Clarivate developer portal, or ask your library) |
+| Google Scholar | no official API; opens a search in a new tab (no scraping, which breaks its terms) | — |
+
+### AI assistant (optional)
+
+Choose Google Gemini (free tier), Groq, OpenRouter free models, a local Ollama, or any OpenAI-compatible service in Settings. It is called only when you press "Read with AI": it reads your note and suggests progress, finished tasks and search keywords, which you confirm before saving. Keys stay on this computer and are never sent back to the page.
+
+### Daily usage
+
+**Today's usage** in the Integration hub shows requests and tokens per source and for the AI, the limits, and the time until reset. Limits are set in Settings; when one is reached, that source stops for the day and resets at local midnight.
+
 ## Agents and MCP
 
 Research Hub ships an MCP server (stdio, standard library). Get a ready-made command, including the agent token, from **Integration hub → MCP tools & agents → Show command**. For Claude Code:
@@ -82,7 +112,7 @@ Interactive diagrams generated and validated with [archify](https://github.com/t
 
 ## Design
 
-Follows the [ui-ux-pro-max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) design-system recommendation: Minimalism & Swiss style, IBM Plex Sans + JetBrains Mono (Noto Sans TC for Chinese), white-first, hairline borders, a single ink-blue accent, mono micro-labels and a dotted grid; meets its pre-delivery checklist (SVG icons, 4.5:1 contrast, visible focus, keyboard support, `prefers-reduced-motion`, responsive 375–1440px).
+The icon is a silhouette of a squirrel holding a nut (`research_hub/web/favicon.svg`, `squirrel.svg`). The visual design follows the [ui-ux-pro-max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) design-system recommendation: Minimalism & Swiss style, IBM Plex Sans + JetBrains Mono (Noto Sans TC for Chinese), white-first, hairline borders, a single ink-blue accent, mono micro-labels and a dotted grid; meets its pre-delivery checklist (SVG icons, 4.5:1 contrast, visible focus, keyboard support, `prefers-reduced-motion`, responsive 375–1440px).
 
 ## Development
 

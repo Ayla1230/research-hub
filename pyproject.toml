@@ -1,6 +1,6 @@
 [project]
 name = "research-hub"
-version = "1.0.0"
+version = "1.1.0"
 description = "Research Hub — a local research-progress dashboard built around PaperRead (研究進度中樞)"
 readme = "README.md"
 requires-python = ">=3.10"

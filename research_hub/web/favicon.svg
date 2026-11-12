@@ -1,1 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="9" fill="#0b0c10"/><rect x="7" y="14.5" width="5" height="3" rx="1.5" fill="#fff"/><rect x="13.5" y="14.5" width="5" height="3" rx="1.5" fill="#fff" opacity=".7"/><rect x="20" y="14.5" width="5" height="3" rx="1.5" fill="#fff" opacity=".4"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<rect width="64" height="64" rx="15" fill="#0b0c10"/>
+<g transform="translate(2 2) scale(.94)">
+<path fill="#fff" d="M25 57c-9-1-16-6-18-15-1-7 2-12 3-18 1-7-1-12 4-17 5-4 13-4 17 1 3 4 2 9-2 10-3 1-5-1-5-3 0-2-3-2-4 0-1 3 1 6 2 9 2 5 0 10 0 15 0 7 2 12 7 16z"/>
+<path fill="#fff" d="M28 58c-4-6-4-14 0-19 3-4 6-6 10-7-1-4 0-7 3-10l1-7c.4-1.2 1.8-1.2 2.2 0l1 4.5c4-.5 8 1.5 10 4.5 2 1 3.2 2.4 2.3 4-1.4 2.2-4.6 2.6-8 2.8.3 2.6-.6 4.7-2.5 6.2 2.6 2.8 3.6 6.6 2.4 10.4 2.3 1.4 2.8 3.8 1.6 5.6z"/>
+<circle cx="51.6" cy="24.4" r="1.4" fill="#0b0c10"/>
+<g fill="#d98b3a">
+<path d="M47.6 38.5c0 4.2 2 7.2 4.6 7.2s4.6-3 4.6-7.2z"/>
+<path d="M46.6 38.6c0-2.7 2.6-3.8 5.6-3.8s5.6 1.1 5.6 3.8z" opacity=".82"/>
+<rect x="51.5" y="32.4" width="1.4" height="2.8" rx=".7"/>
+</g>
+<ellipse cx="47.6" cy="39.6" rx="2.2" ry="1.5" fill="#fff"/>
+<ellipse cx="48" cy="43.2" rx="2" ry="1.4" fill="#fff"/>
+</g>
+</svg>
