@@ -10,6 +10,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
@@ -772,6 +773,11 @@ class ServerTests(unittest.TestCase):
         self.assertIn("outline", json.loads(body))
         code, body = self.req("/api/exam/predict", {})
         self.assertEqual(code, 200)
+        paper = ("Trust in online shopping\nH1: Trust positively affects purchase intention.\n" + "We ran a survey of online shoppers about trust. " * 20).encode()
+        code, body = self.req("/api/exam/from-file?folder=" + quote("週次5"), raw=paper, headers={"X-Filename": quote("論文.txt")})
+        got = json.loads(body)
+        self.assertEqual((code, got["source"], got["questions"][0]["folder"]), (200, "論文.txt", "週次5"))
+        self.assertEqual(self.req("/api/exam/from-file", raw=b"too short", headers={"X-Filename": "a.txt"})[0], 400)
         self.assertEqual(self.req("/api/tts", {"text": ""})[0], 400)
         self.assertIn("voices", json.loads(self.req("/api/tts/voices")[1]))
 
@@ -862,6 +868,26 @@ class TopicThesisTests(unittest.TestCase):
         snap = {"questions": [{"kind": "past", "folder": "", "text": "請說明共同方法變異的來源"}, {"kind": "past", "folder": "", "text": "共同方法變異如何控制"}],
                 "papers": [], "variables": []}
         self.assertTrue(any("共同方法變異" in q["text"] for q in exam.predict_rules(snap)))
+
+    def test_questions_from_paper_text(self):
+        text = ("Trust and online shopping intention\nAbstract\nWe surveyed 300 online shoppers with a questionnaire.\n"
+                "H1: Perceived usefulness positively affects purchase intention.\nH2: Trust moderates the relationship between perceived usefulness and purchase intention.\n"
+                + "Trust and perceived usefulness shape purchase intention in online shopping. " * 30)
+        out = exam.from_paper_rules(text, "paper.pdf", "週次5", "zh")
+        self.assertEqual(out["facts"]["title"], "Trust and online shopping intention")
+        self.assertTrue(any(m[0] == "問卷調查" for m in out["facts"]["methods"]))
+        self.assertGreaterEqual(len(out["questions"]), 5)
+        self.assertTrue(all(q["outline"] and q["folder"] == "週次5" for q in out["questions"]))
+        self.assertTrue(any("問卷調查" in q["text"] for q in out["questions"]))
+        self.assertIn("5C", exam.from_paper_rules(text, "p.txt", "", "en")["questions"][0]["text"])
+
+    def test_pdf_reader_fallback(self):
+        import zlib
+        body = zlib.compress(b"BT (" + b"Trust shapes online shopping intention among Taiwanese consumers " * 30 + b") Tj ET")
+        pdf = b"%PDF-1.4\n1 0 obj<</Filter/FlateDecode>>stream\n" + body + b"\nendstream endobj"
+        self.assertIn("Trust shapes online shopping", integ.read_pdf(pdf))
+        with self.assertRaises(ValueError):
+            integ.read_pdf(b"%PDF-1.4 nothing here")
 
     def test_voice_rejects_empty_and_unknown(self):
         with self.assertRaises(voice.VoiceError):

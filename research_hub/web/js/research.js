@@ -455,7 +455,7 @@
 
   /* ================= section + modules ================= */
   const TABS = [["story", "tab_story", () => H.storyView()], ["rq", "tab_rq", rqView], ["variables", "tab_vars", variablesView], ["literature", "tab_lit", literatureView],
-    ["matrix", "tab_matrix", matrixView], ["model", "tab_model", modelView], ["design", "tab_design", () => H.designView()], ["exam", "tab_exam", () => H.examView()]];
+    ["matrix", "tab_matrix", matrixView], ["model", "tab_model", modelView], ["design", "tab_design", () => H.designView()]];
 
   H.render = H.render || {};
   H.render.core = function () {

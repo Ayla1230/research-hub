@@ -12,7 +12,7 @@
         el("img.mark", { src: "/favicon.svg", alt: "", width: 28, height: 28 }),
         el("span.brand-name", null, "Research Hub"), el("span.brand-sub", null, "研究進度中樞")),
       el("nav.jump", { "aria-label": t("sections") },
-        [["pipeline", t("pipeline")], ["core", t("core")], ["hub", t("hub")], ["activity", t("activity")]].map(([id, label]) =>
+        [["pipeline", t("pipeline")], ["core", t("core")], ["exam", t("exam")], ["hub", t("hub")], ["activity", t("activity")]].map(([id, label]) =>
           el("a", { href: "#" + id }, label))),
       el("div.top-actions", null,
         el("span.live", { id: "live", title: t("live") }, el("i"), el("span", null, t("live"))),
@@ -121,7 +121,7 @@
     if (!force && editing()) { deferred = true; return; }
     deferred = false;
     const y = window.scrollY;
-    topbar(); hero(); H.render.pipeline(); H.render.core(); H.render.hub(); H.render.activity();
+    topbar(); hero(); H.render.pipeline(); H.render.core(); H.render.exam(); H.render.hub(); H.render.activity();
     window.scrollTo(0, y);
   });
   document.addEventListener("focusout", () => setTimeout(() => { if (deferred && !editing()) H.renderAll(); }, 0));

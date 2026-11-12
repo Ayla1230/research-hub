@@ -104,7 +104,7 @@ def segment_zh(text: str, extra: dict | None = None) -> list[str]:
     return [w for w in out if w not in ZH_STOP]
 
 
-def tokens(text: str, extra: dict | None = None) -> list[str]:
+def tokens(text: str, extra: dict | None = None, unique: bool = True) -> list[str]:
     """Content words of a title, in order and without duplicates. Works for Chinese, English and mixed text."""
     text = (text or "").strip()
     found = []
@@ -115,6 +115,8 @@ def tokens(text: str, extra: dict | None = None) -> list[str]:
             word = part.lower().strip("-'")
             if word and word not in EN_STOP and len(word) > 1:
                 found.append(_stem(word))
+    if not unique:
+        return found
     seen, out = set(), []
     for w in found:
         if w not in seen:

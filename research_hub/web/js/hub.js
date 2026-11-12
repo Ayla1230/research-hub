@@ -191,7 +191,7 @@
   H.render.hub = function () {
     const root = document.getElementById("hub");
     H.put(root, 
-      el("div.band-head", null, el("div", null, el("div.eyebrow", null, "03", el("span", null, "/"), t("hub")), el("h2", null, t("hub")), el("p.sub", null, t("hub_hint")))),
+      el("div.band-head", null, el("div", null, el("div.eyebrow", null, "04", el("span", null, "/"), t("hub")), el("h2", null, t("hub")), el("p.sub", null, t("hub_hint")))),
       el("div.hub-grid", null, databasesCard(), usageCard(), foldersCard(), mcpCard(),
         card("code", t("code"), null, H.codeCard()), filesCard(), linksCard()));
   };
@@ -205,7 +205,7 @@
     const ACTOR = (a) => (a === "user" ? t("a_user") : a === "system" ? t("a_system") : a.replace(" (approved)", " ✓"));
     const actorIcon = (a) => (a === "user" ? "edit" : a === "system" ? "settings" : a.includes("approved") ? "check" : a === "python" ? "code" : "bot");
     H.put(root, 
-      el("div.band-head", null, el("div", null, el("div.eyebrow", null, "04", el("span", null, "/"), t("activity")), el("h2", null, t("activity")))),
+      el("div.band-head", null, el("div", null, el("div.eyebrow", null, "05", el("span", null, "/"), t("activity")), el("h2", null, t("activity")))),
       items.length ? el("ol.timeline", null, items.map((a) => el("li", null,
         el("span.tl-ic", null, H.icon(actorIcon(a.actor), 13)),
         el("div.tl-main", null, el("span.tl-actor.mono", null, ACTOR(a.actor)),

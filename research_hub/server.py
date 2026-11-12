@@ -623,6 +623,26 @@ def make_handler(app: App):
                 if ops:
                     store.apply_ops(ops, actor="user")
                 return self._json(200, {"added": len(ops)})
+            if path == "/api/exam/from-file":
+                filename = unquote(self.headers.get("X-Filename", "")).strip()[:200]
+                try:
+                    text = integ.read_document(self._body(MAX_UPLOAD), filename).strip()
+                except ValueError as e:
+                    raise ValidationError(str(e)) from None
+                if len(text) < 300:
+                    raise ValidationError("the file has too little text to write questions from")
+                lang = "en" if (qs.get("lang") or ["zh"])[0] == "en" else "zh"
+                folder = unquote((qs.get("folder") or [""])[0])[:120]
+                result = exam.from_paper_rules(text, filename, folder, lang)
+                if (qs.get("ai") or ["0"])[0] == "1":
+                    out = self._ai_json(*exam.from_paper_prompt(text, filename, lang))
+                    items = [{"text": str(q.get("text") or "")[:2000], "reason": str(q.get("reason") or "")[:300], "outline": str(q.get("outline") or "")[:4000],
+                              "difficulty": q.get("difficulty") if q.get("difficulty") in ("easy", "medium", "hard") else "medium", "folder": folder}
+                             for q in (out.get("questions") or []) if isinstance(q, dict) and str(q.get("text") or "").strip()][:10]
+                    if items:
+                        result.update(questions=items, method="ai")
+                result["source"] = filename
+                return self._json(200, result)
             if path == "/api/exam/predict":
                 data = self._payload()
                 lang, folder, snap = ("en" if data.get("lang") == "en" else "zh"), str(data.get("folder") or "")[:120], store.snapshot()

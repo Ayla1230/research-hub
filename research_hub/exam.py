@@ -157,3 +157,103 @@ def grade_prompt(question: dict, answer: str, lang: str) -> tuple[str, str]:
               f"Write in {language}. Reply with ONE JSON object: "
               '{"score": int, "strengths": str, "gaps": str, "rewrite_tip": str}.')
     return system, f"Question: {question['text'][:2000]}\nExpected outline:\n{(question.get('outline') or '')[:2000]}\n\nAnswer:\n{answer[:8000]}"
+
+
+# ---------------------------------------------------------------- questions from an uploaded paper
+METHODS = [
+    (r"問卷|survey|questionnaire", "問卷調查", "a survey"), (r"實驗|experiment|random(ly)? assign", "實驗設計", "an experiment"),
+    (r"訪談|interview", "訪談", "interviews"), (r"個案研究|case study", "個案研究", "a case study"),
+    (r"縱貫|longitudinal|panel data|time[- ]lagged", "縱貫／分時點資料", "longitudinal data"), (r"次級資料|archival|secondary data", "次級／檔案資料", "archival data"),
+    (r"主題分析|thematic analysis", "主題分析", "thematic analysis"), (r"紮根|grounded theory|gioia", "紮根理論／Gioia 方法", "grounded theory"),
+    (r"結構方程|SEM\b|structural equation", "結構方程模式", "structural equation modelling"), (r"迴歸|regression", "迴歸分析", "regression"),
+    (r"後設分析|meta-analysis", "後設分析", "a meta-analysis"), (r"混合方法|mixed[- ]method", "混合方法", "mixed methods"),
+]
+
+
+def paper_facts(text: str, filename: str = "") -> dict:
+    """What a rule-based reader can tell about a paper: title, methods, hypotheses, frequent terms."""
+    from . import integrations as integ
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    stem = re.sub(r"\.[A-Za-z0-9]+$", "", filename)
+
+    def titleish(ln: str) -> bool:
+        if re.match(r"^(abstract|摘要|keywords|doi|https?:|vol\.|©|copyright|journal|article|original|research[- ]article)", ln, re.I) or re.search(r"\d{4}|@|www\.", ln):
+            return False
+        return (len(ln.split()) >= 4 and len(ln) <= 200) or (topic_mod.has_cjk(ln) and 8 <= len(ln) <= 80)
+
+    head = lines[:25]
+    first = next((i for i, ln in enumerate(head) if titleish(ln)), None)
+    title = stem
+    if first is not None:
+        title = head[first]
+        if first + 1 < len(head) and titleish(head[first + 1]) and not head[first].endswith((".", "。")) and len(title) < 90:
+            title += ("" if topic_mod.has_cjk(title) else " ") + head[first + 1]  # titles often wrap onto a second line
+    hits = sorted(((len(re.findall(pattern, text, re.I)), zh, en) for pattern, zh, en in METHODS), reverse=True)
+    methods = [(zh, en) for n, zh, en in hits if n >= (3 if len(text) > 5000 else 1)][:2]
+    try:
+        fw = integ.extract_framework_rules(text[:120_000])
+    except Exception:
+        fw = {"variables": [], "relations": []}
+    names = {v.get("key"): (v.get("name_zh") or v.get("name_en") or "") for v in fw.get("variables", [])}
+    short = lambda n: bool(n) and (len(n) <= 16 if topic_mod.has_cjk(n) else len(n.split()) <= 5)  # noqa: E731
+    hyps = []
+    for r in fw.get("relations", []):
+        a, b = names.get(r.get("source")), names.get(r.get("target"))
+        if r.get("label") and short(a) and short(b):  # only labelled hypotheses (H1, 假設一): prose is too noisy
+            hyps.append({"label": r["label"], "source": a, "target": b, "kind": r.get("kind") or "effect"})
+    sample = text[:80_000]
+    words = [w.lower() for w in re.findall(r"[A-Za-z][A-Za-z\-]{2,}", sample)]
+    pairs = Counter(f"{a} {b}" for a, b in zip(words, words[1:]) if a not in topic_mod.EN_STOP and b not in topic_mod.EN_STOP and len(a) > 3 and len(b) > 3)
+    singles = Counter(w for w in topic_mod.tokens(sample, unique=False) if (len(w) > 4 or topic_mod.has_cjk(w)) and len(w) > 1)
+    generic = {"author", "journal", "table", "figure", "result", "paper", "article", "example", "research", "researcher", "study", "which", "their", "these",
+               "content", "downloaded", "subject", "https", "academy", "management", "chapter", "stage", "press", "university", "would", "could", "should", "other", "about", "there", "where", "have", "been", "were", "also", "more", "than", "such", "they", "many"}
+    terms = [p for p, n in pairs.most_common(12) if n >= 5 and not (set(p.split()) & generic)][:5]
+    covered = set(" ".join(terms).split())
+    terms += [w for w, n in singles.most_common(60) if n >= 5 and w not in generic and not any(c.startswith(w[:5]) for c in covered)][: 8 - len(terms)]
+    return {"title": title[:200], "methods": methods[:4], "hypotheses": hyps, "terms": terms, "chars": len(text)}
+
+
+def from_paper_rules(text: str, filename: str = "", folder: str = "", lang: str = "zh") -> dict:
+    f = paper_facts(text, filename)
+    zh = lang != "en"
+    name = f"「{f['title']}」" if zh else f"“{f['title']}”"
+    out = []
+
+    def add(q_zh, q_en, o_zh, o_en, level="medium", reason=""):
+        out.append({"text": q_zh if zh else q_en, "outline": o_zh if zh else o_en, "difficulty": level, "reason": reason, "folder": folder})
+
+    add(f"請以 5C 架構說明{name}一文：既有共識、研究缺口、為何重要、作者如何解決，以及主要貢獻。", f"Using the 5C structure, explain {name}: common ground, gap, why it matters, course of action and contribution.",
+        "1. Common ground：文獻已知什麼\n2. Complication：缺口、問題或謎題\n3. Concern：為什麼重要\n4. Course of action：研究設計與資料\n5. Contribution：理論與實務貢獻",
+        "1. Common ground\n2. Complication: the gap\n3. Concern: why it matters\n4. Course of action: design and data\n5. Contribution", "easy", "5C")
+    for h in f["hypotheses"][:3]:
+        verb = {"moderates": ("調節", "moderates"), "mediates": ("中介", "mediates")}.get(h["kind"], ("影響", "affects"))
+        add(f"該文主張「{h['source']}」{verb[0]}「{h['target']}」{('（' + h['label'] + '）') if h['label'] else ''}。請說明其理論推導，並提出至少兩個替代解釋與可檢驗的方法。",
+            f"The paper argues that {h['source']} {verb[1]} {h['target']}. Explain the theoretical reasoning and offer at least two alternative explanations and how to test them.",
+            f"1. 定義 {h['source']} 與 {h['target']}\n2. 作者的理論機制\n3. 替代解釋一：反向因果或共同原因\n4. 替代解釋二：測量或樣本造成\n5. 如何以設計排除（分時點、實驗、控制變數）",
+            "1. Define both constructs\n2. The authors' mechanism\n3. Alternative 1: reverse causality or a common cause\n4. Alternative 2: measurement or sample\n5. Designs that rule them out",
+            "hard", h["label"] or "hypothesis")
+    if f["methods"]:
+        m_zh, m_en = "、".join(m[0] for m in f["methods"]), ", ".join(m[1] for m in f["methods"])
+        add(f"該文採用{m_zh}。請評論這樣的研究設計能否回答其研究問題，並說明主要限制與改善方式。", f"The paper uses {m_en}. Evaluate whether this design can answer its research question; discuss limits and improvements.",
+            "1. 研究問題的性質（描述、改變、因果）\n2. 設計與問題是否契合（方法契合）\n3. 因果推論三要件是否滿足\n4. 測量：共同方法變異、效度\n5. 樣本與外部效度\n6. 具體改善設計",
+            "1. Nature of the question\n2. Methodological fit\n3. Conditions for causal inference\n4. Measurement: CMV, validity\n5. Sample and external validity\n6. Concrete improvements", "medium", m_zh if zh else m_en)
+    if f["terms"]:
+        terms = "、".join(f["terms"][:3]) if zh else ", ".join(f["terms"][:3])
+        add(f"請定義該文的核心概念（{terms}），說明它們之間的關係，並比較與相近概念的差異。", f"Define the paper's core concepts ({terms}), explain how they relate, and distinguish them from neighbouring concepts.",
+            "1. 逐一定義\n2. 概念間的關係\n3. 與相近概念的區辨（jingle／jangle）\n4. 常用測量方式\n5. 小結", "1. Definitions\n2. Relations\n3. Distinction from similar concepts\n4. Common measures\n5. Summary", "easy", terms)
+    add(f"假設你是{name}的審稿人，請提出三項最重要的批評與具體修改建議。", f"As a reviewer of {name}, give the three most important criticisms with concrete suggestions.",
+        "1. 理論：貢獻是否清楚、論證是否充分\n2. 方法：設計、測量、分析\n3. 結果詮釋與限制\n每點：問題 → 為何重要 → 建議", "1. Theory\n2. Method\n3. Interpretation and limits\nFor each: issue → why it matters → suggestion", "hard", "review")
+    add("請說明該文的發現如何延伸到你自己的研究題目：可以借用什麼、需要修正什麼？", "Explain how this paper's findings extend to your own topic: what can you borrow and what must change?",
+        "1. 該文的核心發現\n2. 與我的題目的連結\n3. 可借用的理論或測量\n4. 情境差異與需要的修正\n5. 我的研究能補上的缺口", "1. Core finding\n2. Link to my topic\n3. What to borrow\n4. Context differences\n5. The gap my study fills", "medium", "my topic")
+    return {"questions": out, "facts": f, "method": "rules"}
+
+
+def from_paper_prompt(text: str, filename: str, lang: str) -> tuple[str, str]:
+    language = "English" if lang == "en" else "Traditional Chinese (Taiwan)"
+    system = ("You are an examiner for a graduate seminar. Read the paper excerpt and write 6 essay exam questions that test real understanding of THIS "
+              "paper: its gap and contribution, theory and hypotheses, research design and measurement, limitations, and extension. Use the paper's own "
+              f"constructs and findings; never invent results that are not in the text. Write in {language}. Reply with ONE JSON object: "
+              '{"title": str, "questions": [{"text": str, "reason": str, "difficulty": "easy"|"medium"|"hard", "outline": str}]}. '
+              "Each outline is a numbered answer structure, one point per line.")
+    excerpt = text[:9000] + ("\n…\n" + text[-3000:] if len(text) > 12000 else "")
+    return system, f"File: {filename}\n\n{excerpt}"

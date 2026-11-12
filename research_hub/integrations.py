@@ -542,8 +542,41 @@ def default_query(stage: dict, note: str, context: dict) -> str:
 
 
 # ---------------------------------------------------------------- research model from the user's own writing
+def read_pdf(data: bytes) -> str:
+    """Text of a PDF. Uses ``pdftotext`` (Poppler) when it is installed; otherwise a small built-in reader
+    that handles simple text PDFs. Scanned or CJK-subset PDFs need pdftotext or a .docx/.txt copy."""
+    import shutil
+    import subprocess
+    import zlib
+    exe = shutil.which("pdftotext")
+    if exe:
+        try:
+            done = subprocess.run([exe, "-enc", "UTF-8", "-q", "-", "-"], input=data, capture_output=True, timeout=60)
+            text = done.stdout.decode("utf-8", errors="replace")
+            if len(text.strip()) > 200:
+                return text
+        except (OSError, subprocess.SubprocessError):
+            pass
+    chunks = []
+    for m in re.finditer(rb"stream\r?\n(.*?)endstream", data, re.S):
+        raw = m.group(1)
+        try:
+            raw = zlib.decompress(raw)
+        except zlib.error:
+            pass
+        for block in re.findall(rb"BT(.*?)ET", raw, re.S):
+            parts = re.findall(rb"\((?:\\.|[^\\()])*\)", block)
+            line = b"".join(re.sub(rb"\\([()\\])", rb"\1", part[1:-1]) for part in parts)
+            if line.strip():
+                chunks.append(line.decode("latin-1", errors="replace"))
+    text = "\n".join(chunks)
+    if len(re.findall(r"[A-Za-z]{3,}", text)) < 80:
+        raise ValueError("could not read the text of this PDF — install pdftotext (Poppler), or save it as .docx or .txt")
+    return text
+
+
 def read_document(data: bytes, name: str) -> str:
-    """Plain text from an uploaded draft: .docx, .txt, .md, .tex (and similar text files)."""
+    """Plain text from an uploaded draft: .docx, .pdf, .txt, .md, .tex (and similar text files)."""
     ext = Path(name or "").suffix.lower()
     if ext == ".docx":
         import html
@@ -556,7 +589,9 @@ def read_document(data: bytes, name: str) -> str:
             raise ValueError("could not read this .docx file") from None
         xml = re.sub(r"</w:p>|<w:br[^>]*/>|<w:tab[^>]*/>", "\n", xml)
         return html.unescape(re.sub(r"<[^>]+>", "", xml))[:400_000]
-    if ext in (".pdf", ".doc", ".pages", ".odt"):
+    if ext == ".pdf":
+        return read_pdf(data)[:400_000]
+    if ext in (".doc", ".pages", ".odt"):
         raise ValueError(f"{ext} is not supported — save it as .docx or paste the text")
     for enc in ("utf-8", "cp950", "big5", "utf-16"):
         try:

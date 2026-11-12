@@ -178,16 +178,31 @@
     const r = await busy(btn, () => H.api("/api/exam/predict", { body: { folder, ai, lang: H.lang } }));
     if (!r) return;
     if (!r.questions.length) return H.toast(L("資料還不夠：先加入歷屆考題或在文獻寫 5C 筆記", "Not enough data yet: add past questions or 5C notes"), "error");
+    showCandidates(r, L("考題預測", "Predicted questions"), r.method === "ai" ? L("由 AI 依歷屆考題與文獻筆記預測。", "Predicted by AI from past questions and notes.")
+      : L("依歷屆考題高頻主題、文獻 5C 筆記與你的變數產生。", "From frequent past topics, 5C notes and your variables."));
+  }
+
+  function showCandidates(r, heading, note) {
     const chosen = new Set(r.questions.map((_, i) => i));
+    const spans = [];
     const list = el("ul.ex-predict", null, r.questions.map((q, i) => {
       const box = el("input", { type: "checkbox", checked: true, onchange: () => (box.checked ? chosen.add(i) : chosen.delete(i)) });
-      return el("li", null, el("label.ci-prov", null, box, el("span", null, q.text)), el("span.mono.muted.sm", null, `${pick(DIFF, q.difficulty)} · ${q.reason || ""}`));
+      const span = el("span", null, q.text); spans.push(span);
+      return el("li", null, el("label.ci-prov", null, box, span), el("span.mono.muted.sm", null, `${pick(DIFF, q.difficulty)} · ${q.reason || ""}`));
     }));
-    H.openLayer("modal", L("考題預測", "Predicted questions"), el("div", null, el("p.hint", null, r.method === "ai" ? L("由 AI 依歷屆考題與文獻筆記預測。", "Predicted by AI from past questions and notes.")
-      : L("依歷屆考題高頻主題、文獻 5C 筆記與你的變數產生。", "From frequent past topics, 5C notes and your variables.")), list),
+    // The detected paper title can be wrong (journal headers, slides): let the user correct it once for every question.
+    let current = (r.facts || {}).title || "";
+    const titleFix = current ? H.input(current, { "aria-label": L("論文題目", "Paper title") }) : null;
+    if (titleFix) titleFix.addEventListener("input", () => {
+      const next = titleFix.value.trim() || current;
+      r.questions.forEach((q, i) => { q.text = q.text.split(current).join(next); spans[i].textContent = q.text; });
+      current = next;
+    });
+    H.openLayer("modal", heading, el("div", null, el("p.hint", null, note),
+      titleFix ? H.field(L("偵測到的論文題目（不對可以直接改，題目文字會一起更新）", "Detected paper title (edit it if wrong; the questions update)"), titleFix) : null, list),
     [H.btn(L("取消", "Cancel"), { variant: "ghost", onclick: H.closeLayer }), H.btn(L("加入題庫", "Add to bank"), { variant: "primary", onclick: async () => {
       const ops = r.questions.filter((_, i) => chosen.has(i)).map((q) => ({ op: "create", entity: "question", data: { text: q.text, folder: q.folder || "", kind: "predicted",
-        difficulty: q.difficulty || "", outline: q.outline || "", paper_id: q.paper_id || 0, source: r.method === "ai" ? "AI" : "", minutes: 30 } }));
+        difficulty: q.difficulty || "", outline: q.outline || "", paper_id: q.paper_id || 0, source: r.source || (r.method === "ai" ? "AI" : ""), minutes: 30 } }));
       if (ops.length) await H.ops(ops, true);
       H.closeLayer();
     } })], { wide: true });
@@ -200,7 +215,7 @@
     const inFolder = (x) => ui.examFolder === "*" || (x.folder || "") === ui.examFolder;
     const qs = s.questions.filter((q) => inFolder(q) && (ui.examKind === "all" || q.kind === ui.examKind));
     const ps = s.papers.filter((p) => inFolder(p) && (ui.examFolder !== "*" || p.folder));
-    const go = (patch) => { Object.assign(ui, patch); H.render.core(); };
+    const go = (patch) => { Object.assign(ui, patch); H.render.exam(); };
     const side = el("nav.ex-folders", { "aria-label": L("資料夾", "Folders") },
       el("datalist", { id: "exam-folders" }, folders.filter(Boolean).map((f) => el("option", { value: f }))),
       [["*", L("全部", "All")], ...folders.map((f) => [f, f || L("未分類", "Unfiled")])].map(([f, name]) =>
@@ -252,10 +267,37 @@
             H.btn(L("編輯", "Edit"), { icon: "edit", small: true, variant: "ghost", onclick: () => H.editQuestion(q) })));
       })) : el("div.empty", null, el("p", null, L("還沒有考題。可以新增歷屆考題、載入範例題庫，或按「考題預測」。", "No questions yet. Add past questions, load the starter bank or predict.")), seedBtn);
     }
+    const fileIn = el("input", { type: "file", accept: ".pdf,.docx,.txt,.md,.tex", hidden: true });
+    const upFolder = H.input(ui.examFolder !== "*" ? ui.examFolder : "", { placeholder: L("存到資料夾（選填）", "Folder (optional)"), list: "exam-folders", class: "sm", "aria-label": L("資料夾", "Folder") });
+    const upBtn = H.btn(L("選擇論文檔案", "Choose a paper"), { icon: "upload", variant: "primary", onclick: () => fileIn.click() });
+    const fromFile = (file) => busy(upBtn, async () => {
+      if (!file) return;
+      const qsx = new URLSearchParams({ lang: H.lang, folder: upFolder.value.trim(), ai: aiBox.checked ? "1" : "0" });
+      const r = await H.api("/api/exam/from-file?" + qsx, { body: file, headers: { "X-Filename": encodeURIComponent(file.name), "Content-Type": "application/octet-stream" } });
+      const f = r.facts || {};
+      const found = [f.title ? L("題目：", "Title: ") + f.title : "", f.methods?.length ? L("方法：", "Method: ") + f.methods.map((m) => m[H.lang === "en" ? 1 : 0]).join(L("、", ", ")) : "",
+        f.hypotheses?.length ? L(`假設 ${f.hypotheses.length} 條`, `${f.hypotheses.length} hypotheses`) : "", f.terms?.length ? L("關鍵詞：", "Terms: ") + f.terms.join(L("、", ", ")) : ""].filter(Boolean).join(" ｜ ");
+      showCandidates(r, L("由論文出題", "Questions from the paper") + " · " + file.name, (r.method === "ai" ? L("由 AI 閱讀全文後出題。", "Written by AI from the text. ") : L("依規則從全文辨識題目、方法、假設與關鍵詞後出題（勾選 AI 可出更貼近內容的題目）。", "Rule-based from the detected title, methods, hypotheses and terms (tick AI for closer questions). ")) + found);
+    });
+    fileIn.addEventListener("change", () => { fromFile(fileIn.files[0]); fileIn.value = ""; });
+    const drop = el("div.ex-upload", { ondragover: (e) => { e.preventDefault(); drop.classList.add("over"); }, ondragleave: () => drop.classList.remove("over"),
+      ondrop: (e) => { e.preventDefault(); drop.classList.remove("over"); fromFile(e.dataTransfer.files[0]); } },
+      el("div", null, el("h4", null, L("由上傳的論文檔案出題", "Questions from an uploaded paper")),
+        el("p.muted.sm", null, L("拖曳或選擇一篇論文（PDF、Word .docx、.txt）。系統讀取全文後產生申論題與答題架構，你勾選要留下的題目才會存進題庫。檔案只在這台電腦處理；勾選 AI 時才會把文字送到你設定的 AI 服務。",
+          "Drop or choose a paper (PDF, .docx, .txt). The hub reads it and drafts essay questions with outlines; only the ones you tick are saved. The file stays on this computer unless AI is ticked."))),
+      el("div.ex-upload-act", null, upFolder, upBtn, fileIn));
     const practiced = s.questions.filter((q) => q.status !== "new").length;
-    return el("div.ex", null, toolbar,
+    return el("div.ex", null, drop, toolbar,
       el("div.ex-body", null, el("div", null, side, s.questions.length ? el("p.muted.sm.ex-stat", null, L(`已練習 ${practiced} / ${s.questions.length} 題`, `${practiced} / ${s.questions.length} practised`)) : null,
         s.questions.length ? seedBtn : null), main));
+  };
+
+  H.render = H.render || {};
+  H.render.exam = function () {
+    const root = document.getElementById("exam");
+    if (!root) return;
+    H.put(root, el("div.band-head", null, el("div", null, el("div.eyebrow", null, "03", el("span", null, "/"), H.t("exam")), el("h2", null, H.t("exam")), el("p.sub", null, H.t("exam_hint")))),
+      el("div.panel", null, el("div.tab-panel", null, H.examView())));
   };
 
   /* ================= 3. podcast voice ================= */
