@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Research Hub 系統架構",
+    "locale": "zh-TW",
+    "quality_profile": "showcase",
+    "output": "research_hub/web/diagrams/architecture.html"
+  },
+  "components": [
+    { "id": "agent", "type": "external", "label": "AI 智能體", "sublabel": "Claude Code 等", "pos": [250, 40], "size": [140, 60] },
+    { "id": "mcp", "type": "messagebus", "label": "MCP 伺服器", "sublabel": "stdio", "pos": [500, 40], "size": [150, 60] },
+    { "id": "user", "type": "external", "label": "研究者", "sublabel": "瀏覽器", "pos": [40, 200], "size": [120, 60] },
+    { "id": "web", "type": "frontend", "label": "儀表板", "sublabel": "中文 / English", "pos": [250, 200], "size": [140, 60] },
+    { "id": "server", "type": "backend", "label": "HTTP 伺服器", "sublabel": "127.0.0.1:8770", "pos": [500, 200], "size": [150, 64], "tag": "Token + Host 檢查" },
+    { "id": "store", "type": "database", "label": "工作區", "sublabel": "SQLite + uploads", "pos": [790, 200], "size": [150, 60] },
+    { "id": "paperread", "type": "database", "label": "PaperRead 文獻庫", "sublabel": "唯讀", "pos": [250, 380], "size": [150, 60] },
+    { "id": "folders", "type": "database", "label": "本機文獻資料夾", "sublabel": "PDF / BibTeX", "pos": [440, 380], "size": [150, 60] },
+    { "id": "python", "type": "backend", "label": "Python 腳本", "sublabel": "需手動啟用", "pos": [630, 380], "size": [140, 60] },
+    { "id": "openalex", "type": "cloud", "label": "OpenAlex API", "sublabel": "文獻檢索", "pos": [810, 380], "size": [140, 60] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "本機 loopback", "wraps": ["web", "server", "store"] }
+  ],
+  "connections": [
+    { "id": "user-web", "from": "user", "to": "web", "label": "操作", "variant": "emphasis" },
+    { "id": "web-server", "from": "web", "to": "server", "label": "API + SSE", "variant": "emphasis" },
+    { "id": "server-store", "from": "server", "to": "store", "label": "交易寫入" },
+    { "id": "agent-mcp", "from": "agent", "to": "mcp", "label": "工具" },
+    { "id": "mcp-server", "from": "mcp", "to": "server", "label": "只能提案", "variant": "security" },
+    { "id": "server-paperread", "from": "server", "to": "paperread", "label": "同步", "variant": "dashed" },
+    { "id": "server-folders", "from": "server", "to": "folders", "label": "掃描", "variant": "dashed" },
+    { "id": "server-python", "from": "server", "to": "python", "label": "執行" },
+    { "id": "server-openalex", "from": "server", "to": "openalex", "label": "HTTPS" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "使用者", "items": ["根目錄 / 為儀表板，/zh/ 與 /en/ 切換語言", "寫入需頁面 token，阻擋跨站請求"] },
+    { "dot": "rose", "title": "智能體", "items": ["agent token 只能讀取與提出變更", "所有提案需在收件匣核准後才套用"] },
+    { "dot": "emerald", "title": "整合", "items": ["PaperRead 與資料夾同步會先進收件匣", "本機檔案僅限設定中的資料夾"] }
+  ]
+}

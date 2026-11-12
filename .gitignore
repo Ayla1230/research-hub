@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+# archify delivery receipts (contain local absolute paths)
+research_hub/web/diagrams/*.json
+.archify/**/review-*/
