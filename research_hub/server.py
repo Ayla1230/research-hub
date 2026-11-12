@@ -26,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import __version__, integrations as integ
+from . import __version__, exam, integrations as integ, thesis, topic as topic_mod, voice
 from .store import ENTITIES, QuotaError, Store, ValidationError
 
 WEB = Path(__file__).with_name("web")
@@ -396,6 +396,8 @@ def make_handler(app: App):
                 return self._json(200, {"scripts": integ.list_scripts(settings.get("code_dir", "")),
                                         "runs": app.runner.runs, "allow_run": bool(settings.get("allow_code_run")),
                                         "code_dir": settings.get("code_dir", "")})
+            if path == "/api/tts/voices":
+                return self._json(200, {"engine": voice.engine(), "voices": voice.voices()})
             if path == "/api/usage":
                 data = store.usage()
                 data["ai"] = bool(integ.ai_config(store.settings()))
@@ -586,6 +588,75 @@ def make_handler(app: App):
                 return self._json(200, self._framework(qs))
             if path == "/api/slides/ai":
                 return self._json(200, self._slides_ai(self._payload()))
+            if path == "/api/topic/check":
+                data = self._payload()
+                title = str(data.get("title") or "").strip()[:300]
+                if not title:
+                    raise ValidationError("enter a title first")
+                snap, settings = store.snapshot(), store.settings()
+                online = data.get("online", True) is not False
+                if online:
+                    store.take_quota("openalex")
+                ai = (lambda system, user: self._ai_text(system, user)) if online and integ.ai_config(settings) and data.get("ai") else None
+                result = topic_mod.check(title, snap.get("topic") or {}, snap, settings, title_en=str(data.get("title_en") or "")[:300], online=online, ai=ai)
+                store.apply_ops([{"op": "update", "entity": "topic", "match": {"key": "main"},
+                                  "data": {"title": title, "checked": topic_mod.dumps(result)[:60000]}}], actor="user")
+                return self._json(200, result)
+            if path == "/api/export/docx":
+                data = self._payload()
+                blob = thesis.build(store.snapshot(), data)
+                name = re.sub(r"[\\/:*?\"<>|\x00-\x1f]", "_", str(data.get("filename") or "thesis"))[:120] + ".docx"
+                return self._json(200, {"url": f"/api/exports/{app.add_export(blob, name)}", "name": name, "size": len(blob)})
+            if path == "/api/tts":
+                data = self._payload()
+                try:
+                    blob = voice.synthesize(str(data.get("text") or ""), str(data.get("voice") or ""), data.get("rate") or 1, data.get("pitch") or 1)
+                except voice.VoiceError as e:
+                    raise ValidationError(str(e)) from None
+                except Exception as e:
+                    return self._error(500, f"speech failed: {e}")
+                name = re.sub(r"[\\/:*?\"<>|\x00-\x1f]", "_", str(data.get("filename") or "podcast"))[:120] + ".wav"
+                return self._json(200, {"url": f"/api/exports/{app.add_export(blob, name)}", "name": name, "size": len(blob)})
+            if path == "/api/exam/seed":
+                ops = exam.seed_ops(store.snapshot()["questions"])
+                if ops:
+                    store.apply_ops(ops, actor="user")
+                return self._json(200, {"added": len(ops)})
+            if path == "/api/exam/predict":
+                data = self._payload()
+                lang, folder, snap = ("en" if data.get("lang") == "en" else "zh"), str(data.get("folder") or "")[:120], store.snapshot()
+                if data.get("ai"):
+                    out = self._ai_json(*exam.predict_prompt(snap, folder, lang))
+                    items = [{"text": str(q.get("text") or "")[:2000], "reason": str(q.get("reason") or "")[:300], "outline": str(q.get("outline") or "")[:4000],
+                              "difficulty": q.get("difficulty") if q.get("difficulty") in ("easy", "medium", "hard") else "medium", "folder": folder or "考題預測"}
+                             for q in (out.get("questions") or []) if isinstance(q, dict) and str(q.get("text") or "").strip()][:10]
+                    return self._json(200, {"questions": items, "method": "ai"})
+                return self._json(200, {"questions": exam.predict_rules(snap, folder, lang), "method": "rules"})
+            if path in ("/api/exam/analyze", "/api/exam/grade"):
+                data = self._payload()
+                question = store.get("question", int(data.get("id") or 0))
+                if not question:
+                    raise ValidationError("unknown question")
+                lang = "en" if data.get("lang") == "en" else "zh"
+                if path.endswith("analyze"):
+                    if data.get("ai"):
+                        paper = store.get("paper", question["paper_id"]) if question.get("paper_id") else None
+                        out = self._ai_json(*exam.analyze_prompt(question, paper, lang))
+                        return self._json(200, {"analysis": str(out.get("analysis") or "")[:6000], "outline": str(out.get("outline") or "")[:6000], "method": "ai"})
+                    return self._json(200, exam.outline_for(question["text"], lang))
+                answer = str(data.get("answer") or "")[:20000]
+                if not answer.strip():
+                    raise ValidationError("write an answer first")
+                result = exam.coverage(question.get("outline") or "", answer)
+                if data.get("ai"):
+                    out = self._ai_json(*exam.grade_prompt(question, answer, lang))
+                    try:
+                        result["score"] = max(0, min(100, int(out.get("score"))))
+                    except (TypeError, ValueError):
+                        pass
+                    result.update(method="ai", strengths=str(out.get("strengths") or "")[:2000], gaps=str(out.get("gaps") or "")[:2000],
+                                  tip=str(out.get("rewrite_tip") or "")[:2000])
+                return self._json(200, result)
             if path == "/api/checkin":
                 return self._json(200, self._checkin(self._payload()))
             if path == "/api/watch/scan":
@@ -677,6 +748,23 @@ def make_handler(app: App):
             return result
 
         # ---------------------------------------------------------- slide text by the AI assistant
+        def _ai_text(self, system: str, user: str) -> str:
+            cfg = integ.ai_config(store.settings())
+            if not cfg:
+                raise ValidationError("AI assistant is not set up — choose a provider and key in Settings")
+            store.take_quota("ai")
+            text, tokens = integ.ai_chat(cfg, system, user)
+            store.add_tokens("ai", tokens)
+            return text
+
+        def _ai_json(self, system: str, user: str) -> dict:
+            try:
+                return integ.parse_json_block(self._ai_text(system, user)) or {}
+            except (ValidationError, QuotaError):
+                raise
+            except Exception as e:
+                raise ValidationError(f"AI service unavailable: {e}") from None
+
         def _slides_ai(self, data: dict) -> dict:
             """Key message and speaker notes per slide, following the user's design instructions.
             Only text comes back; the deck itself is built in the browser."""

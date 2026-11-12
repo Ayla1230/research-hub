@@ -37,6 +37,9 @@ MEASURE_SOURCES = ("", "self", "supervisor", "peer", "objective", "manipulated",
 DESIGN_PURPOSES = ("", "describe", "change", "causal")
 DESIGN_TYPES = ("", "cross_sectional", "longitudinal", "experiment")
 CHECK_STATUS = ("", "ok", "issue")
+QUESTION_KINDS = ("past", "predicted", "practice")
+QUESTION_STATUS = ("new", "practiced", "mastered")
+DIFFICULTY = ("", "easy", "medium", "hard")
 SIGNS = ("", "+", "-")
 EVIDENCE = ("", "supports", "contradicts", "mixed", "defines", "measures", "mentions")
 
@@ -97,6 +100,7 @@ ENTITIES: dict[str, dict] = {
             "c_course": ("text", None), "c_contribution": ("text", None),
             "complication_type": ("enum", COMPLICATION_TYPES),
             "story_role": ("enum", ("",) + FIVE_C),  # which block of MY story this paper supports
+            "folder": ("str", None),  # reading-notes folder, e.g. a course week or an exam topic
         },
         "required": ("title",),
     },
@@ -110,6 +114,24 @@ ENTITIES: dict[str, dict] = {
         },
         "required": ("key",),
         "fixed": True,
+    },
+    "topic": {  # the thesis title and why it is worth doing (fixed row, key "main")
+        "table": "topic",
+        "fields": {"key": ("str", None), "title": ("str", None), "title_en": ("str", None), "reason": ("text", None),
+                   "benefit": ("text", None), "audience": ("str", None), "checked": ("text", None)},
+        "required": ("key",),
+        "fixed": True,
+    },
+    "question": {  # exam preparation: past, predicted and practice essay questions, grouped in folders
+        "table": "questions",
+        "fields": {
+            "folder": ("str", None), "kind": ("enum", QUESTION_KINDS), "text": ("text", None), "source": ("str", None),
+            "year": ("int", (0, 3000)), "difficulty": ("enum", DIFFICULTY), "analysis": ("text", None),
+            "outline": ("text", None), "answer": ("text", None), "minutes": ("int", (0, 600)),
+            "score": ("int", (0, 100)), "status": ("enum", QUESTION_STATUS), "paper_id": ("int", None),
+            "feedback": ("text", None), "position": ("int", None),
+        },
+        "required": ("text",),
     },
     "story": {  # my own research story, one row per C (fixed: updated, never created or deleted)
         "table": "story",
@@ -254,6 +276,19 @@ CREATE TABLE IF NOT EXISTS story (
   id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, sentence TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
   created TEXT NOT NULL, updated TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS topic (
+  id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, title TEXT NOT NULL DEFAULT '', title_en TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT '', benefit TEXT NOT NULL DEFAULT '', audience TEXT NOT NULL DEFAULT '',
+  checked TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, updated TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS questions (
+  id INTEGER PRIMARY KEY, folder TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'past', text TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT '', year INTEGER NOT NULL DEFAULT 0, difficulty TEXT NOT NULL DEFAULT '',
+  analysis TEXT NOT NULL DEFAULT '', outline TEXT NOT NULL DEFAULT '', answer TEXT NOT NULL DEFAULT '',
+  minutes INTEGER NOT NULL DEFAULT 0, score INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'new',
+  paper_id INTEGER NOT NULL DEFAULT 0, feedback TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0,
+  created TEXT NOT NULL, updated TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS design (
   id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, purpose TEXT NOT NULL DEFAULT '', design TEXT NOT NULL DEFAULT '',
   waves INTEGER NOT NULL DEFAULT 0, sample TEXT NOT NULL DEFAULT '', limitations TEXT NOT NULL DEFAULT '',
@@ -344,7 +379,10 @@ class Store:
             for col in ("c_common", "c_complication", "c_concern", "c_course", "c_contribution", "complication_type", "story_role"):
                 if col not in paper_cols:
                     db.execute(f"ALTER TABLE papers ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+            if "folder" not in paper_cols:
+                db.execute("ALTER TABLE papers ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
             stamp = now()
+            db.execute("INSERT OR IGNORE INTO topic (key, created, updated) VALUES ('main', ?, ?)", (stamp, stamp))
             for key in FIVE_C:
                 db.execute("INSERT OR IGNORE INTO story (key, created, updated) VALUES (?, ?, ?)", (key, stamp, stamp))
             db.execute("INSERT OR IGNORE INTO design (key, created, updated) VALUES ('main', ?, ?)", (stamp, stamp))
@@ -498,6 +536,8 @@ class Store:
                 "variables": rows("SELECT * FROM variables ORDER BY position, id"),
                 "relations": rows("SELECT * FROM relations ORDER BY position, id"),
                 "design": (rows("SELECT * FROM design WHERE key='main'") or [{}])[0],
+                "topic": (rows("SELECT * FROM topic WHERE key='main'") or [{}])[0],
+                "questions": rows("SELECT * FROM questions ORDER BY folder, position, id"),
                 "story": rows("SELECT * FROM story ORDER BY CASE key WHEN 'common' THEN 0 WHEN 'complication' THEN 1 "
                               "WHEN 'concern' THEN 2 WHEN 'course' THEN 3 ELSE 4 END"),
                 "papers": rows("SELECT * FROM papers ORDER BY updated DESC, id DESC"),

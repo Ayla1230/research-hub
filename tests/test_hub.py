@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from research_hub import demo, integrations as integ, mcp_server  # noqa: E402
+from research_hub import demo, exam, integrations as integ, mcp_server, thesis, topic, voice  # noqa: E402
 from research_hub.server import App, make_handler  # noqa: E402
 from research_hub.store import QuotaError, Store, ValidationError  # noqa: E402
 
@@ -750,6 +750,32 @@ class ServerTests(unittest.TestCase):
         code, body = self.req("/api/scripts/run", {"path": "/tmp/x.py"})
         self.assertEqual(code, 400)
 
+    def test_topic_check_offline_and_docx_and_exam(self):
+        code, body = self.req("/api/topic/check", {"title": "信任對知覺有用性與使用意圖關係之調節效果：以台灣網路購物為例", "online": False})
+        self.assertEqual(code, 200)
+        out = json.loads(body)
+        self.assertIn("知覺有用性", out["tokens"])
+        self.assertIn("trust", out["tokens_en"])
+        self.assertIsNone(out["parts"]["novelty"])
+        self.assertEqual(self.store.snapshot()["topic"]["title"][:2], "信任")
+        code, body = self.req("/api/export/docx", {"school": "測試大學", "filename": "論文"})
+        self.assertEqual(code, 200)
+        code, blob = self.req(json.loads(body)["url"] + "?token=" + self.app.token, token=False)
+        self.assertEqual((code, blob[:2]), (200, b"PK"))
+        code, body = self.req("/api/exam/seed", {})
+        self.assertEqual(json.loads(body)["added"], len(exam.SEED))
+        self.assertEqual(json.loads(self.req("/api/exam/seed", {})[1])["added"], 0)
+        q = self.store.snapshot()["questions"][0]
+        code, body = self.req("/api/exam/grade", {"id": q["id"], "answer": q["outline"]})
+        self.assertGreaterEqual(json.loads(body)["coverage"], 80)
+        code, body = self.req("/api/exam/analyze", {"id": q["id"]})
+        self.assertIn("outline", json.loads(body))
+        code, body = self.req("/api/exam/predict", {})
+        self.assertEqual(code, 200)
+        self.assertEqual(self.req("/api/tts", {"text": ""})[0], 400)
+        self.assertIn("voices", json.loads(self.req("/api/tts/voices")[1]))
+
+
 
 class McpTests(unittest.TestCase):
     def test_protocol(self):
@@ -785,6 +811,61 @@ class McpTests(unittest.TestCase):
         self.assertEqual(mcp_server.handle(hub, {"jsonrpc": "2.0", "id": 5, "method": "bogus"})["error"]["code"], -32601)
 
 
+
+
+class TopicThesisTests(unittest.TestCase):
+    def test_segmentation_and_translation(self):
+        toks = topic.tokens("從生態系統視角探討地方創生中的多元利害關係人價值共創機制")
+        self.assertEqual(toks[:2], ["生態系統", "地方創生"])
+        self.assertNotIn("探討", toks)
+        text, _ = topic.translate_glossary("信任與使用意圖")
+        self.assertEqual(text, "trust behavioral intention")
+        self.assertEqual(topic.tokens("The Effects of Trust on Intentions"), ["trust", "intention"])
+
+    def test_overlap_and_levels(self):
+        mine = topic.tokens("trust and online shopping intention in Taiwan")
+        self.assertEqual(topic.overlap(mine, topic.tokens("Trust, intention and online shopping: evidence from Taiwan")), 100)
+        self.assertLess(topic.overlap(mine, topic.tokens("Soil chemistry of rice fields")), 30)
+        self.assertEqual([topic.band(x) for x in (80, 55, 35, 10)], ["crowded", "done", "partial", "rare"])
+        weak = topic.check("信任", {}, {"papers": [], "story": []}, {}, online=False)
+        full = {"reason": "線上交易詐騙增加，使用者即使覺得好用也不敢用。", "benefit": "幫助平台業者知道該先投資信任機制還是功能。", "audience": "電商平台"}
+        strong = topic.check("信任對知覺有用性與使用意圖關係之調節效果：以台灣網路購物為例", full,
+                             {"papers": [], "story": [{"key": k, "sentence": "這是一個足夠長的句子用來測試。"} for k in ("complication", "concern", "contribution")]}, {}, online=False)
+        self.assertEqual(weak["level"], "weak")
+        self.assertEqual(strong["level"], "strong")
+        self.assertIn("reason", weak["missing"]["story"])
+
+    def test_docx_structure(self):
+        import zipfile
+        store = Store(Path(tempfile.mkdtemp()))
+        demo.apply(store)
+        z = zipfile.ZipFile(io.BytesIO(thesis.build(store.snapshot(), {"title": "A & B <測試>", "font_zh": "新細明體", "size": 99})))
+        doc, styles = z.read("word/document.xml").decode(), z.read("word/styles.xml").decode()
+        self.assertIn("論文設定0", styles)
+        self.assertIn("新細明體", styles)
+        self.assertIn('w:fmt="lowerRoman"', doc)
+        self.assertIn('w:fmt="decimal" w:start="1"', doc)
+        self.assertIn("TOC \\o", doc)
+        self.assertIn("A &amp; B &lt;測試&gt;", doc)
+        self.assertIn("第一章 緒論", doc)
+        import xml.dom.minidom
+        for part in ("word/document.xml", "word/styles.xml", "word/header1.xml", "word/footer1.xml"):
+            xml.dom.minidom.parseString(z.read(part))
+        self.assertEqual(thesis.options({"size": 99})["size"], 16)
+
+    def test_exam_rules(self):
+        self.assertEqual(len(exam.seed_ops([])), len(exam.SEED))
+        got = exam.coverage("1. 共同方法變異的定義\n2. 程序控制\n3. 統計控制", "共同方法變異是指測量方法造成的變異。\n程序控制包含分時點。")
+        self.assertEqual(len(got["hit"]), 2)
+        self.assertEqual(len(got["missed"]), 1)
+        snap = {"questions": [{"kind": "past", "folder": "", "text": "請說明共同方法變異的來源"}, {"kind": "past", "folder": "", "text": "共同方法變異如何控制"}],
+                "papers": [], "variables": []}
+        self.assertTrue(any("共同方法變異" in q["text"] for q in exam.predict_rules(snap)))
+
+    def test_voice_rejects_empty_and_unknown(self):
+        with self.assertRaises(voice.VoiceError):
+            voice._clean("  ")
+        self.assertIsInstance(voice.voices(), list)
 
 class DesignTests(unittest.TestCase):
     def setUp(self):
