@@ -25,7 +25,7 @@ PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 OP_SCHEMA = {
     "type": "object",
     "description": (
-        "One change. create: {op:'create', entity, data, ref?}; update: {op:'update', entity, id | match:{key:value}, data}; "
+        "One change. create: {op:'create', entity, data, ref?}; update: {op:'update', entity, id | match:{key:value}, data, append?:{textField: text}}; "
         "delete: {op:'delete', entity, id}; link/unlink: {op:'link', link:'rq_variable'|'rq_paper'|'variable_paper', a, b, data?}. "
         "Entities: stage, task, rq, variable, paper, resource. Use \"$ref\" to point at an object created earlier in the same batch. "
         "Call get_schema for field names and allowed values."
@@ -126,15 +126,11 @@ def call_tool(hub: Hub, name: str, args: dict):
     if name == "report_stage_progress":
         data = {k: args[k] for k in ("status", "progress") if k in args}
         ops = []
+        update = {"op": "update", "entity": "stage", "match": {"key": args["stage_key"]}, "data": data}
         if args.get("note"):
-            s = hub.state()
-            stage = next((st for st in s["stages"] if st["key"] == args["stage_key"]), None)
-            if not stage:
-                raise ValueError(f"no stage with key {args['stage_key']!r}")
-            prefix = (stage["notes"].rstrip() + "\n\n") if stage["notes"].strip() else ""
-            data["notes"] = prefix + str(args["note"])
-        if data:
-            ops.append({"op": "update", "entity": "stage", "match": {"key": args["stage_key"]}, "data": data})
+            update["append"] = {"notes": str(args["note"])}  # appended at approval time, never overwrites
+        if data or args.get("note"):
+            ops.append(update)
         for tid in args.get("done_task_ids") or []:
             ops.append({"op": "update", "entity": "task", "id": int(tid), "data": {"done": True}})
         if not ops:

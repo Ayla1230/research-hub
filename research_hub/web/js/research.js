@@ -242,10 +242,11 @@
         : null);
   }
 
-  function literatureView() {
+  function literatureView(scope = "core") {
     const papers = H.state.papers;
-    const filter = H.input(H.ui.litFilter, { type: "search", placeholder: t("filter_ph"), "aria-label": t("filter_ph"), class: "filter" });
-    filter.addEventListener("input", H.debounce(() => { H.ui.litFilter = filter.value; drawTable(); }, 150));
+    const filter = H.input(H.ui.litFilter, { type: "search", placeholder: t("filter_ph"), "aria-label": t("filter_ph"), class: "filter", dataset: { fkey: "lit-filter-" + scope } });
+    const redraw = H.debounce(() => drawTable(), 150);
+    filter.addEventListener("input", () => { H.ui.litFilter = filter.value; redraw(); });
     const statusChips = el("div.seg.small", { role: "radiogroup", "aria-label": t("status") }, ["all", ...H.PAPER_STATUS].map((s) => {
       const n = s === "all" ? papers.length : papers.filter((p) => p.status === s).length;
       return el("button.seg-btn", { type: "button", role: "radio", "aria-checked": String(H.ui.litStatus === s), onclick: () => { H.ui.litStatus = s; H.render.core(); } },
@@ -264,7 +265,7 @@
         (!q || [p.title, p.authors, p.tags, p.venue, p.notes, String(p.year)].join(" ").toLowerCase().includes(q)));
       if (!papers.length) { H.put(table, el("div.empty-state", null, H.icon("book", 22), el("p", null, t("lit_empty")))); return; }
       if (!rows.length) { H.put(table, el("p.empty", null, t("no_results"))); return; }
-      H.put(table, el("ul.papers", null, rows.map(paperRow)));
+      H.put(table, el("ul.papers", null, rows.map((p) => paperRow(p, scope))));
     };
     drawTable();
     return el("div", null,
@@ -288,9 +289,9 @@
   }
   H.exportBib = exportBib;
 
-  function paperRow(p) {
+  function paperRow(p, scope) {
     const vlinks = H.links("variable_paper", "b", p.id);
-    const status = H.select(p.status, H.PAPER_STATUS.map((s) => [s, t("ps_" + s)]), { class: "sm status-sel ps-" + p.status, "aria-label": t("status"),
+    const status = H.select(p.status, H.PAPER_STATUS.map((s) => [s, t("ps_" + s)]), { class: "sm status-sel ps-" + p.status, "aria-label": t("status"), dataset: { fkey: `paper-st-${p.id}-${scope}` },
       onchange: (e) => H.ops([{ op: "update", entity: "paper", id: p.id, data: { status: e.target.value } }]) });
     const prUrl = (H.safeUrl(H.state.settings.paperread_url) || "").replace(/\/$/, "");
     return el("li.paper" + (p.status === "excluded" ? ".excluded" : ""), null,
@@ -319,7 +320,7 @@
     const cycle = ["", ...H.EVIDENCE];
     const cell = (v, p) => {
       const ev = map.get(v.id + ":" + p.id) || "";
-      return el("td", null, el("button.cell" + (ev ? "." + ev : ""), {
+      return el("td", null, el("button.cell" + (ev ? "." + ev : ""), { dataset: { fkey: `cell-${v.id}-${p.id}` },
         type: "button", "aria-label": `${v.symbol} × ${p.title}: ${ev ? evLabel(ev) : t("unlinked")}`, title: ev ? evLabel(ev) : t("unlinked"),
         onclick: () => {
           const next = cycle[(cycle.indexOf(ev) + 1) % cycle.length];
@@ -447,7 +448,7 @@
 
   /* Stage modules reuse the same views inside a stage's workspace. */
   H.renderModule = function (module) {
-    if (module === "literature") return literatureView();
+    if (module === "literature") return literatureView("stage");
     if (module === "rq") return rqView();
     if (module === "variables") return el("div.module-stack", null, variablesView(), modelView());
     if (module === "code") return H.codeCard ? H.codeCard() : null;

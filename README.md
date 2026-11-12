@@ -17,6 +17,8 @@ start.cmd             # Windows
 ```
 
 開啟 <http://127.0.0.1:8770/>。根目錄 `/` 即為儀表板，`/zh/`、`/en/` 直接切換語言（右上角也可切換）。
+**建議下載到自己電腦執行**：所有操作都在本機（`127.0.0.1`）完成，不消耗網路流量；預設不載入任何網路字型。只有 OpenAlex 檢索與開啟外部資料庫連結會連網。
+
 資料預設存在 `~/ResearchHub`（可用 `--data <資料夾>` 或環境變數 `RESEARCH_HUB_HOME` 指定），埠號可用 `--port` 或 `RESEARCH_HUB_PORT` 指定。
 
 ## 主要功能
@@ -52,7 +54,9 @@ curl -X POST http://127.0.0.1:8770/api/agent/proposals -H "Authorization: Bearer
      -H "Content-Type: application/json" -d '{"title":"文獻探討完成","ops":[{"op":"update","entity":"stage","match":{"key":"literature"},"data":{"status":"review","progress":100}}]}'
 ```
 
-提案格式（`ops`）：`create`／`update`／`delete`（`entity` 為 `stage`、`task`、`rq`、`variable`、`paper`、`resource`），以及 `link`／`unlink`（`rq_variable`、`rq_paper`、`variable_paper`）。同一批次中可用 `"ref": "p1"` 建立物件，再以 `"$p1"` 引用。
+審閱時若取消勾選某個「新增」項目，引用它的連結會自動一起取消；若提案建立後該項目已被你修改，會顯示衝突提醒。智能體附加的筆記以 `append` 在核准當下接在最後，不會覆蓋你較新的內容。
+
+提案格式（`ops`）：`create`／`update`（可加 `"append": {"notes": "…"}`）／`delete`（`entity` 為 `stage`、`task`、`rq`、`variable`、`paper`、`resource`），以及 `link`／`unlink`（`rq_variable`、`rq_paper`、`variable_paper`）。同一批次中可用 `"ref": "p1"` 建立物件，再以 `"$p1"` 引用。
 
 ## 與 PaperRead 的整合
 

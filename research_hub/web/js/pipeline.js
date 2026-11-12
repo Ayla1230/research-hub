@@ -35,7 +35,7 @@
     const button = el("button.node-btn", {
       type: "button", "aria-expanded": String(open), "aria-controls": "stage-panel",
       "aria-label": `${String(index + 1).padStart(2, "0")} ${H.stageTitle(stage)} — ${t("st_" + stage.status)}, ${stage.status === "done" ? 100 : stage.progress}%`,
-      dataset: { stage: stage.id },
+      dataset: { stage: stage.id, fkey: "node-" + stage.id },
       onclick: () => { H.ui.openStage = open ? null : stage.id; H.render.pipeline(); if (!open) requestAnimationFrame(() => document.getElementById("stage-panel")?.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" })); },
       onkeydown: (e) => {
         if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
@@ -85,7 +85,7 @@
   function statusControl(stage) {
     return el("div.seg", { role: "radiogroup", "aria-label": t("status") },
       H.STAGE_STATUS.map((st) => el("button.seg-btn." + st, {
-        type: "button", role: "radio", "aria-checked": String(stage.status === st),
+        type: "button", role: "radio", "aria-checked": String(stage.status === st), dataset: { fkey: `stage-st-${stage.id}-${st}` },
         onclick: () => {
           const data = { status: st };
           if (st === "active" && !stage.start_date) data.start_date = new Date().toISOString().slice(0, 10);
@@ -97,7 +97,7 @@
   function progressControl(stage) {
     const value = stage.status === "done" ? 100 : stage.progress;
     const out = el("output.mono", null, value + "%");
-    const range = el("input.range", { type: "range", min: 0, max: 100, step: 5, value, "aria-label": t("progress"),
+    const range = el("input.range", { type: "range", min: 0, max: 100, step: 5, value, "aria-label": t("progress"), dataset: { fkey: "stage-prog-" + stage.id },
       style: { "--v": value + "%" } });
     range.addEventListener("input", () => { out.textContent = range.value + "%"; range.style.setProperty("--v", range.value + "%"); });
     range.addEventListener("change", () => {
@@ -111,7 +111,7 @@
   }
 
   function dateControl(stage, field, label) {
-    const input = el("input.inp.sm", { type: "date", value: stage[field] || "", "aria-label": label });
+    const input = el("input.inp.sm", { type: "date", value: stage[field] || "", "aria-label": label, dataset: { fkey: `stage-${field}-${stage.id}` } });
     input.addEventListener("change", () => H.ops([{ op: "update", entity: "stage", id: stage.id, data: { [field]: input.value } }]));
     return el("label.date-ctl", null, el("span.lbl", null, label), input);
   }
@@ -119,7 +119,7 @@
   function taskList(stage) {
     const tasks = stageTasks(stage);
     const list = el("ul.tasks", null, tasks.map((task) => {
-      const box = el("input", { type: "checkbox", checked: !!task.done, "aria-label": task.title,
+      const box = el("input", { type: "checkbox", checked: !!task.done, "aria-label": task.title, dataset: { fkey: "task-" + task.id },
         onchange: () => H.ops([{ op: "update", entity: "task", id: task.id, data: { done: box.checked } }]) });
       const title = el("span.task-title", { contenteditable: "plaintext-only", spellcheck: "false", role: "textbox", "aria-label": t("edit") }, task.title);
       title.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); title.blur(); } });
@@ -132,13 +132,13 @@
         H.btn(t("delete"), { icon: "x", iconOnly: true, small: true, variant: "ghost", class: "task-del",
           onclick: () => H.ops([{ op: "delete", entity: "task", id: task.id }]) }));
     }));
-    const add = el("input.inp.task-add", { type: "text", placeholder: t("add_task_ph"), "aria-label": t("add_task_ph") });
+    const add = el("input.inp.task-add", { type: "text", placeholder: t("add_task_ph"), "aria-label": t("add_task_ph"), dataset: { fkey: "task-add-" + stage.id } });
     add.addEventListener("keydown", async (e) => {
       if (e.key !== "Enter" || !add.value.trim()) return;
       const title = add.value.trim();
       add.value = "";
-      await H.ops([{ op: "create", entity: "task", data: { stage_id: stage.id, title } }]);
-      document.querySelector(".task-add")?.focus();
+      try { await H.ops([{ op: "create", entity: "task", data: { stage_id: stage.id, title } }]); }
+      catch (_) { add.value = title; }
     });
     const done = tasks.filter((x) => x.done).length;
     return el("div.card", null,
@@ -180,6 +180,8 @@
   };
   /* Files need the page token, so fetch them and hand the browser a blob URL. */
   async function openFile(f, download) {
+    // Never render uploaded HTML/SVG as a page from this origin: hand it over as a download.
+    if (/\.(x?html?|svg|xml)$/i.test(f.name) || /html|svg|xml/i.test(f.mime || "")) download = true;
     const win = download ? null : window.open("", "_blank");
     try {
       const res = await fetch(`/api/files/${f.id}${download ? "?download=1" : ""}`, { headers: { "X-Hub-Token": H.token } });

@@ -126,7 +126,7 @@
   H.ops = async function (ops, quiet) {
     try {
       const out = await H.api("/api/ops", { body: { ops } });
-      await H.refresh();
+      await H.refresh(true);
       return out;
     } catch (e) {
       if (!quiet) H.toast(e.message, "error");
@@ -162,6 +162,10 @@
     if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
     else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   }
+  // Escape closes the open dialog even when focus has drifted out of it.
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && H.ui.layer && !e.defaultPrevented) { e.preventDefault(); H.closeLayer(); }
+  });
   H.openLayer = function (kind, title, body, footer, opts = {}) {
     lastFocus = document.activeElement;
     const layer = document.getElementById("layer");

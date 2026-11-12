@@ -71,26 +71,51 @@
       el("a", { href: "/static/diagrams/index.html", target: "_blank", rel: "noopener" }, H.lang === "en" ? "System map" : "系統架構圖")));
   }
 
-  /* ---------- render scheduling: don't yank the DOM out from under the user ---------- */
+  /* ---------- render scheduling: don't yank the DOM out from under the user ----------
+     Controls that carry data-fkey (stable focus keys) keep focus, value and caret across
+     re-renders. Free-text editors without a key (notes, inline titles, search boxes)
+     defer background refreshes until they lose focus. */
   let deferred = false;
   function editing() {
     const a = document.activeElement;
-    if (!a || a === document.body) return false;
+    if (!a || a === document.body || a.dataset.fkey) return false;
     if (a.closest("#layer")) return false; // dialogs are not re-rendered by state refresh
     return a.matches("input[type=text], input[type=search], input[type=number], input[type=date], input:not([type]), textarea, [contenteditable]");
   }
-  H.renderAll = function () {
-    if (editing()) { deferred = true; return; }
+  function keepFocus(fn) {
+    return function (...args) {
+      const a = document.activeElement;
+      const key = a && a !== document.body && !a.closest("#layer") ? a.dataset.fkey || a.id : null;
+      const isText = key && a.matches("input[type=text], input[type=search], input:not([type])");
+      const snap = isText ? { value: a.value, start: a.selectionStart, end: a.selectionEnd } : null;
+      const out = fn.apply(this, args);
+      if (key && !document.contains(a)) {
+        const next = document.querySelector(`[data-fkey="${CSS.escape(key)}"]`) || document.getElementById(key);
+        if (next) {
+          next.focus({ preventScroll: true });
+          if (snap && next.matches("input")) {
+            next.value = snap.value;
+            try { next.setSelectionRange(snap.start, snap.end); } catch (_) { /* not a text input */ }
+          }
+        }
+      }
+      return out;
+    };
+  }
+  for (const name of Object.keys(H.render)) H.render[name] = keepFocus(H.render[name]);
+  /* force: the user just acted (H.ops) — show the result now instead of deferring. */
+  H.renderAll = keepFocus(function (force) {
+    if (!force && editing()) { deferred = true; return; }
     deferred = false;
     const y = window.scrollY;
     topbar(); hero(); H.render.pipeline(); H.render.core(); H.render.hub(); H.render.activity();
     window.scrollTo(0, y);
-  };
+  });
   document.addEventListener("focusout", () => setTimeout(() => { if (deferred && !editing()) H.renderAll(); }, 0));
 
-  H.refresh = async function () {
+  H.refresh = async function (force) {
     H.state = await H.api("/api/state");
-    H.renderAll();
+    H.renderAll(force === true);
   };
   const softRefresh = H.debounce(() => H.refresh().catch(() => {}), 200);
 
@@ -121,6 +146,11 @@
   document.addEventListener("DOMContentLoaded", async () => {
     try {
       await H.refresh();
+      // Visiting /zh/ or /en/ makes that the remembered language for the root URL.
+      const explicit = (location.pathname.match(/^\/(zh|en)\/?$/) || [])[1];
+      if (explicit && H.state.settings.language !== explicit) {
+        H.api("/api/settings", { body: { language: explicit } }).then(() => { H.state.settings.language = explicit; }).catch(() => {});
+      }
       foot();
       connect();
       const hash = location.hash.slice(1);

@@ -116,12 +116,13 @@ class StoreTests(unittest.TestCase):
         (Path(self.dir) / "uploads" / "keep.txt").write_text("x")
         fid = self.store.apply_ops([{"op": "create", "entity": "file", "data": {"name": "keep.txt", "stored": "keep.txt"}}],
                                    allow_internal=True)[0]["id"]
-        pid = self.store.propose("agent", "delete", [{"op": "delete", "entity": "file", "id": fid}])["id"]
+        with self.assertRaises(ValidationError):  # proposals cannot touch upload records at all
+            self.store.propose("agent", "delete", [{"op": "delete", "entity": "file", "id": fid}])
         self.assertTrue((Path(self.dir) / "uploads" / "keep.txt").exists())
         with self.assertRaises(ValidationError):
             self.store.apply_ops([{"op": "delete", "entity": "file", "id": fid}, {"op": "create", "entity": "nope"}])
         self.assertTrue((Path(self.dir) / "uploads" / "keep.txt").exists())
-        self.store.decide(pid, True)
+        self.store.apply_ops([{"op": "delete", "entity": "file", "id": fid}])
         self.assertFalse((Path(self.dir) / "uploads" / "keep.txt").exists())
 
     def test_concurrent_approve_applies_once(self):
@@ -141,6 +142,34 @@ class StoreTests(unittest.TestCase):
             th.join()
         self.assertEqual(len(self.store.snapshot()["rqs"]), 1)
         self.assertEqual(len(errors), 5)
+
+    def test_append_and_conflicts(self):
+        ops = [{"op": "update", "entity": "stage", "match": {"key": "topic"}, "data": {"progress": 40}, "append": {"notes": "agent note"}}]
+        import time as _t
+        pid = self.store.propose("agent", "x", ops)["id"]
+        self.assertEqual(self.store.list_proposals()[0]["conflicts"], [])
+        _t.sleep(1.1)
+        self.store.apply_ops([{"op": "update", "entity": "stage", "match": {"key": "topic"}, "data": {"notes": "mine"}}])
+        self.assertEqual(self.store.list_proposals()[0]["conflicts"], [0])
+        self.store.decide(pid, True)
+        self.assertEqual(self.store.snapshot()["stages"][0]["notes"], "mine\n\nagent note")
+        with self.assertRaises(ValidationError):
+            self.store.apply_ops([{"op": "update", "entity": "stage", "id": 1, "append": {"title_zh": "x"}}])
+
+    def test_internal_entities_and_settings_validation(self):
+        with self.assertRaises(ValidationError):
+            self.store.propose("agent", "x", [{"op": "delete", "entity": "file", "id": 1}])
+        with self.assertRaises(ValidationError):
+            self.store.apply_ops([{"op": "update", "entity": "file", "id": 1, "data": {"stored": "../x"}}])
+        for bad in ({"language": "fr"}, {"paperread_url": "javascript:alert(1)"}, {"agent_token": "x"}, {"openalex_mailto": "nope"}):
+            with self.subTest(bad=bad), self.assertRaises(ValidationError):
+                self.store.save_settings(bad)
+        self.assertEqual(self.store.save_settings({"code_timeout": -5})["code_timeout"], 10)
+
+    def test_unknown_ref_message(self):
+        with self.assertRaises(ValidationError) as cm:
+            self.store.apply_ops([{"op": "link", "link": "variable_paper", "a": "$nope", "b": 1}])
+        self.assertIn("unknown reference", str(cm.exception))
 
     def test_partial_approval_must_be_subset(self):
         ops = [{"op": "create", "entity": "rq", "data": {"text": "agent"}}]
@@ -398,7 +427,8 @@ class McpTests(unittest.TestCase):
             "name": "report_stage_progress", "arguments": {"stage_key": "lit", "progress": 50, "note": "new", "done_task_ids": [5]}}})
         self.assertNotIn("isError", out["result"])
         title, ops = hub.sent[-1]
-        self.assertEqual(ops[0]["data"], {"progress": 50, "notes": "old\n\nnew"})
+        self.assertEqual(ops[0]["data"], {"progress": 50})
+        self.assertEqual(ops[0]["append"], {"notes": "new"})
         self.assertEqual(ops[1], {"op": "update", "entity": "task", "id": 5, "data": {"done": True}})
         err = mcp_server.handle(hub, {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "nope", "arguments": {}}})
         self.assertTrue(err["result"]["isError"])

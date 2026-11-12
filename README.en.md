@@ -17,6 +17,8 @@ start.cmd             # Windows
 ```
 
 Open <http://127.0.0.1:8770/>. The root `/` is the dashboard; `/zh/` and `/en/` switch language (also from the top bar).
+**Run it on your own computer**: everything happens on `127.0.0.1`, so it uses no network traffic, and no web fonts are downloaded. Only OpenAlex searches and the external database links go online.
+
 Data lives in `~/ResearchHub` by default (`--data <folder>` or `RESEARCH_HUB_HOME`); change the port with `--port` or `RESEARCH_HUB_PORT`.
 
 ## Features
@@ -51,7 +53,9 @@ curl -X POST http://127.0.0.1:8770/api/agent/proposals -H "Authorization: Bearer
      -H "Content-Type: application/json" -d '{"title":"Literature review done","ops":[{"op":"update","entity":"stage","match":{"key":"literature"},"data":{"status":"review","progress":100}}]}'
 ```
 
-Operations: `create` / `update` / `delete` on `stage`, `task`, `rq`, `variable`, `paper`, `resource`; `link` / `unlink` for `rq_variable`, `rq_paper`, `variable_paper`. Within one batch, `"ref": "p1"` names a new object and `"$p1"` refers to it.
+When you untick a "create" while reviewing, changes that refer to it are unticked too; a change whose target you edited after it was proposed is flagged as a conflict. Agent notes use `append`, added at approval time, so they never overwrite newer text.
+
+Operations: `create` / `update` (optionally `"append": {"notes": "…"}`) / `delete` on `stage`, `task`, `rq`, `variable`, `paper`, `resource`; `link` / `unlink` for `rq_variable`, `rq_paper`, `variable_paper`. Within one batch, `"ref": "p1"` names a new object and `"$p1"` refers to it.
 
 ## PaperRead integration
 

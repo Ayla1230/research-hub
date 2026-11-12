@@ -6,11 +6,8 @@
   <meta name="hub-token" content="{{TOKEN}}">
   <meta name="hub-version" content="{{VERSION}}">
   <meta name="color-scheme" content="light">
-  <title>Research Hub · 研究進度中樞</title>
+  <title>{{TITLE}}</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&display=swap">
   <link rel="stylesheet" href="/static/css/app.css?v={{VERSION}}">
   <script src="/static/js/i18n.js?v={{VERSION}}" defer></script>
   <script src="/static/js/core.js?v={{VERSION}}" defer></script>
@@ -20,11 +17,11 @@
   <script src="/static/js/app.js?v={{VERSION}}" defer></script>
 </head>
 <body>
-  <a class="skip" href="#main">Skip to content</a>
+  <a class="skip" href="#main">{{SKIP}}</a>
   <header class="topbar" id="topbar"></header>
   <main id="main">
     <section class="hero" id="hero" aria-labelledby="hero-title"></section>
-    <section class="band" id="pipeline" aria-label="Research pipeline"></section>
+    <section class="band" id="pipeline" aria-label="{{PIPELINE}}"></section>
     <section class="band" id="core"></section>
     <section class="band" id="hub"></section>
     <section class="band" id="activity"></section>
@@ -32,6 +29,6 @@
   <footer class="foot" id="foot"></footer>
   <div id="layer"></div>
   <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
-  <noscript>Research Hub needs JavaScript.</noscript>
+  <noscript>{{NOSCRIPT}}</noscript>
 </body>
 </html>

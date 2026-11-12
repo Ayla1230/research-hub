@@ -8,6 +8,7 @@ path, one validation layer and one activity log.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import sqlite3
 import threading
@@ -307,7 +308,7 @@ class Store:
         return out
 
     def save_settings(self, patch: dict, actor: str = "user") -> dict:
-        allowed = set(DEFAULT_SETTINGS)
+        allowed = set(DEFAULT_SETTINGS) - {"agent_token"}  # rotated only via rotate_agent_token
         clean = {}
         for k, v in (patch or {}).items():
             if k not in allowed:
@@ -328,6 +329,14 @@ class Store:
                 v = [str(x).strip()[:1000] for x in v if str(x).strip()][:50]
             else:
                 v = str(v or "").strip()[:2000]
+            if k == "language" and v not in ("zh", "en"):
+                raise ValidationError("language must be zh or en")
+            if k == "code_timeout":
+                v = max(10, min(86400, v))
+            if k == "paperread_url" and v and not re.match(r"^https?://[^\s/]+", v, re.I):
+                raise ValidationError("PaperRead URL must start with http:// or https://")
+            if k == "openalex_mailto" and v and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", v):
+                raise ValidationError("OpenAlex contact must be an email address")
             clean[k] = v
         with self.db() as db:
             for k, v in clean.items():
@@ -385,7 +394,31 @@ class Store:
             for r in cur:
                 item = dict(r)
                 item["ops"] = json.loads(item.pop("ops_json") or "[]")
+                if item["status"] == "pending":
+                    item["conflicts"] = self._conflicts(db, item)
                 out.append(item)
+        return out
+
+    def _conflicts(self, db, proposal: dict) -> list[int]:
+        """Indices of update/delete ops whose target changed after the proposal was made,
+        so the user sees that approving would overwrite newer data."""
+        out = []
+        for i, op in enumerate(proposal["ops"]):
+            if not isinstance(op, dict) or op.get("op") not in ("update", "delete") or op.get("entity") not in ENTITIES:
+                continue
+            if op.get("op") == "update" and not op.get("data"):
+                continue  # append-only updates never overwrite
+            table = ENTITIES[op["entity"]]["table"]
+            row = None
+            if isinstance(op.get("id"), int):
+                row = db.execute(f"SELECT updated FROM {table} WHERE id=?", (op["id"],)).fetchone()
+            elif isinstance(op.get("match"), dict) and len(op["match"]) == 1:
+                (field, value), = op["match"].items()
+                if field in ENTITIES[op["entity"]]["fields"]:
+                    rows = db.execute(f"SELECT updated FROM {table} WHERE {field}=?", (str(value),)).fetchall()
+                    row = rows[0] if len(rows) == 1 else None
+            if row and row["updated"] > proposal["created"]:
+                out.append(i)
         return out
 
     # ------------------------------------------------------------------ writes
@@ -475,8 +508,8 @@ class Store:
         if entity not in ENTITIES:
             raise ValidationError(f"unknown entity {entity!r}")
         spec = ENTITIES[entity]
-        if spec.get("internal") and not allow_internal and kind == "create":
-            raise ValidationError(f"{entity} cannot be created this way")
+        if spec.get("internal") and not allow_internal and kind != "delete":
+            raise ValidationError(f"{entity} records are managed by the upload endpoint")
         table = spec["table"]
         data = op.get("data") or {}
         if not isinstance(data, dict):
@@ -512,6 +545,21 @@ class Store:
             return {"op": "create", "entity": entity, "id": eid}
         if kind == "update":
             eid = self._find(db, entity, op, refs)
+            # "append": add text to the end of a text field at apply time, so a note
+            # proposed earlier never overwrites what the user wrote in the meantime.
+            append = op.get("append") or {}
+            if not isinstance(append, dict):
+                raise ValidationError("append must be an object")
+            if append:
+                current = dict(db.execute(f"SELECT * FROM {table} WHERE id=?", (eid,)).fetchone())
+                for field, value in append.items():
+                    if field not in spec["fields"] or spec["fields"][field][0] != "text":
+                        raise ValidationError(f"cannot append to {entity}.{field}")
+                    if field in clean:
+                        raise ValidationError(f"{entity}.{field} is both set and appended")
+                    old_text = (current.get(field) or "").rstrip()
+                    addition = str(value or "").strip()
+                    clean[field] = _clean(entity, field, spec["fields"][field], f"{old_text}\n\n{addition}" if old_text else addition)
             if not clean:
                 return {"op": "update", "entity": entity, "id": eid, "changed": []}
             for field in spec["required"]:
@@ -548,9 +596,9 @@ class Store:
         spec = LINKS[name]
         a_col, a_ent = spec["a"]
         b_col, b_ent = spec["b"]
+        a, b = self._resolve(op.get("a"), refs), self._resolve(op.get("b"), refs)  # may raise "unknown reference"
         try:
-            a = int(self._resolve(op.get("a"), refs))
-            b = int(self._resolve(op.get("b"), refs))
+            a, b = int(a), int(b)
         except (TypeError, ValueError):
             raise ValidationError("link needs numeric a and b") from None
         self._check_ref(db, a_ent, a)
@@ -617,6 +665,8 @@ class Store:
             try:
                 refs: dict[str, int] = {}
                 for index, op in enumerate(ops):
+                    if isinstance(op, dict) and ENTITIES.get(op.get("entity"), {}).get("internal"):
+                        raise ValidationError(f"op #{index + 1}: {op.get('entity')} records cannot be changed by proposals")
                     try:
                         self._apply_one(conn, op, refs, "dry-run", False, set())
                     except ValidationError as e:

@@ -201,12 +201,15 @@
     const root = document.getElementById("activity");
     const all = H.state.activity;
     const items = all.slice(0, H.ui.activityAll ? 60 : 12);
+    const ACTOR = (a) => (a === "user" ? t("a_user") : a === "system" ? t("a_system") : a.replace(" (approved)", " ✓"));
     const actorIcon = (a) => (a === "user" ? "edit" : a === "system" ? "settings" : a.includes("approved") ? "check" : a === "python" ? "code" : "bot");
     H.put(root, 
       el("div.band-head", null, el("div", null, el("div.eyebrow", null, "04", el("span", null, "/"), t("activity")), el("h2", null, t("activity")))),
       items.length ? el("ol.timeline", null, items.map((a) => el("li", null,
         el("span.tl-ic", null, H.icon(actorIcon(a.actor), 13)),
-        el("div.tl-main", null, el("span.tl-actor.mono", null, a.actor), el("span.tl-act", null, a.action + (a.entity ? " · " + a.entity : "")), el("span.tl-sum", null, a.summary)),
+        el("div.tl-main", null, el("span.tl-actor.mono", null, ACTOR(a.actor)),
+          el("span.tl-act", null, (H.has("a_" + a.action) ? t("a_" + a.action) : a.action) + (a.entity ? " · " + (H.has("e_" + a.entity) ? t("e_" + a.entity) : a.entity) : "")),
+          el("span.tl-sum", null, a.summary)),
         el("time.mono.muted", { datetime: a.at, title: a.at }, H.when(a.at))))) : el("p.empty", null, t("no_activity")),
       all.length > 12 ? el("div.more", null, H.btn(H.ui.activityAll ? t("show_less") : t("view_all"), { small: true, variant: "ghost", icon: "chevD",
         onclick: () => { H.ui.activityAll = !H.ui.activityAll; H.render.activity(); } })) : null);
@@ -214,6 +217,16 @@
 
   /* ================= inbox ================= */
   const ENTITY = (e) => (H.has("e_" + e) ? t("e_" + e) : e);
+  const FIELD = (f) => (H.has(f) ? t(f) : H.has("f_" + f) ? t("f_" + f) : f);
+  const VALUE = (k, v) => {
+    if (k === "status" && H.has("st_" + v)) return t("st_" + v);
+    if (k === "status" && H.has("ps_" + v)) return t("ps_" + v);
+    if (k === "status" && H.has("rq_" + v)) return t("rq_" + v);
+    if (k === "role" && H.has("role_" + v)) return t("role_" + v);
+    if (k === "evidence" && H.has("ev_" + v)) return t("ev_" + v);
+    if (typeof v === "boolean") return v ? "✓" : "✗";
+    return String(v).slice(0, 80);
+  };
   function describe(op, all) {
     const s = H.state;
     const refTitle = (ref) => {
@@ -236,29 +249,61 @@
     if (op.op === "create") {
       const d = op.data || {};
       return { kind: "create", text: `${ENTITY(op.entity)}: ${d.title || d.title_zh || (d.symbol ? d.symbol + " " + (d.name_zh || d.name_en || "") : "") || d.name || d.text || ""}`,
-        detail: Object.entries(d).filter(([k, v]) => v && !["title", "title_zh"].includes(k)).slice(0, 5).map(([k, v]) => `${k}: ${String(v).slice(0, 60)}`).join(" · ") };
+        detail: Object.entries(d).filter(([k, v]) => v && !["title", "title_zh"].includes(k)).slice(0, 5).map(([k, v]) => `${FIELD(k)}: ${VALUE(k, v)}`).join(" · ") };
     }
     if (op.op === "update") {
       const entity = op.entity;
       let label = name(entity, target);
       if (op.match && entity === "stage") { const st = s.stages.find((x) => x.key === target); if (st) label = H.stageTitle(st); }
-      return { kind: "update", text: `${ENTITY(entity)}: ${label}`, detail: Object.entries(op.data || {}).map(([k, v]) => `${k} → ${String(v).slice(0, 80)}`).join(" · ") };
+      const parts = Object.entries(op.data || {}).map(([k, v]) => `${FIELD(k)} → ${VALUE(k, v)}`);
+      for (const [k, v] of Object.entries(op.append || {})) parts.push(`${FIELD(k)} ＋ ${String(v).slice(0, 80)}`);
+      return { kind: "update", text: `${ENTITY(entity)}: ${label}`, detail: parts.join(" · ") };
     }
     if (op.op === "delete") return { kind: "delete", text: `${ENTITY(op.entity)}: ${name(op.entity, target)}`, detail: "" };
     return { kind: "other", text: JSON.stringify(op).slice(0, 120), detail: "" };
   }
   const OP_ICON = { create: "plus", update: "edit", delete: "trash", link: "link", unlink: "x", other: "sparkle" };
 
+  /* Indices of ops that reference "$ref" objects created by op i (directly or transitively). */
+  function dependents(ops) {
+    const refOf = new Map(ops.map((o, i) => [i, o && o.op === "create" && o.ref ? "$" + o.ref : null]));
+    const uses = (o, ref) => JSON.stringify(o).includes(JSON.stringify(ref));
+    const deps = ops.map(() => new Set());
+    ops.forEach((_, i) => {
+      const ref = refOf.get(i);
+      if (!ref) return;
+      ops.forEach((o, j) => { if (j !== i && uses(o, ref)) deps[i].add(j); });
+    });
+    return deps;
+  }
+
   function proposalCard(p, pending) {
     const checks = [];
+    const deps = dependents(p.ops);
+    const conflicts = new Set(p.conflicts || []);
+    const sync = () => {
+      // Unticking a "create" also unticks (and locks) every change that refers to it.
+      const blocked = new Set();
+      const walk = (i) => deps[i].forEach((j) => { if (!blocked.has(j)) { blocked.add(j); walk(j); } });
+      checks.forEach(([i, box]) => { if (!box.checked) walk(i); });
+      checks.forEach(([i, box]) => {
+        box.disabled = blocked.has(i);
+        if (blocked.has(i)) box.checked = false;
+        box.closest(".op").classList.toggle("off", !box.checked);
+      });
+    };
     const ops = p.ops.map((op, i) => {
       const d = describe(op, p.ops);
-      const box = pending ? el("input", { type: "checkbox", checked: true, "aria-label": d.text }) : null;
+      const box = pending ? el("input", { type: "checkbox", checked: true, "aria-label": d.text, onchange: sync }) : null;
       if (box) checks.push([i, box]);
       return el("li.op." + d.kind, null, box ? el("label.check", null, box, el("span.box", null, H.icon("check", 12))) : null,
-        el("span.op-ic", null, H.icon(OP_ICON[d.kind], 13)), el("div", null, el("div.op-text", null, d.text), d.detail ? el("div.op-detail", null, d.detail) : null));
+        el("span.op-ic", null, H.icon(OP_ICON[d.kind], 13)),
+        el("div", null, el("div.op-text", null, d.text), d.detail ? el("div.op-detail", null, d.detail) : null,
+          pending && conflicts.has(i) ? el("div.op-warn", null, H.icon("alert", 12), t("conflict")) : null));
     });
-    const act = async (approve) => {
+    let busy = false;
+    const act = async (approve, btns) => {
+      if (busy) return;
       try {
         let body = {};
         if (approve) {
@@ -266,21 +311,26 @@
           if (!keep.length) return H.toast(t("select_none"), "error");
           if (keep.length !== p.ops.length) body = { ops: keep.map((i) => p.ops[i]) };
         }
+        busy = true;
+        btns.forEach((b) => (b.disabled = true));
         await H.api(`/api/proposals/${p.id}/${approve ? "approve" : "reject"}`, { body });
         H.toast(approve ? t("approved") : t("rejected"), approve ? "ok" : "info");
         await loadInbox();
-        await H.refresh();
+        await H.refresh(true);
       } catch (e) { H.toast(e.message, "error"); }
+      finally { busy = false; btns.forEach((b) => (b.disabled = false)); }
     };
+    const btns = [];
+    const reject = H.btn(t("reject"), { variant: "ghost", small: true, onclick: () => act(false, btns) });
+    const approve = H.btn(p.ops.length > 1 ? t("approve_sel") : t("approve"), { icon: "check", variant: "primary", small: true, onclick: () => act(true, btns) });
+    btns.push(reject, approve);
     return el("li.proposal." + p.status, null,
       el("div.p-head", null, el("span.p-src", null, H.icon(p.source.includes("PaperRead") ? "book" : p.source.includes("folder") ? "folder" : "bot", 14), p.source),
         el("time.mono.muted", { datetime: p.created }, H.when(p.created)), !pending ? el("span.pill." + p.status, null, t(p.status)) : null),
       el("h3.p-title", null, p.title),
       p.summary ? el("p.p-summary", null, p.summary) : null,
       el("details.p-ops", { open: pending && p.ops.length <= 8 ? true : null }, el("summary", null, t("changes", { n: p.ops.length })), el("ul.ops", null, ops)),
-      pending ? el("div.p-actions", null,
-        H.btn(t("reject"), { variant: "ghost", small: true, onclick: () => act(false) }),
-        H.btn(p.ops.length > 1 ? t("approve_sel") : t("approve"), { icon: "check", variant: "primary", small: true, onclick: () => act(true) })) : null);
+      pending ? el("div.p-actions", null, reject, approve) : null);
   }
 
   let inboxItems = [];
@@ -293,6 +343,7 @@
   let inboxBody = null;
   function drawInbox() {
     if (!inboxBody) return;
+    const hadFocus = inboxBody.contains(document.activeElement) || document.activeElement === document.body;
     const pending = H.ui.inboxTab === "pending";
     const list = pending ? inboxItems : inboxItems.filter((p) => p.status !== "pending");
     H.put(inboxBody, 
@@ -301,11 +352,18 @@
           onclick: () => { H.ui.inboxTab = id; loadInbox(); } }, label))),
       el("p.hint-line", null, t("inbox_hint")),
       list.length ? el("ol.proposals", null, list.map((p) => proposalCard(p, pending))) : el("div.empty-state", null, H.icon("inbox", 22), el("p", null, t("inbox_empty"))),
-      pending && list.length > 1 ? el("div.toolbar", null, el("span"), H.btn(t("approve_all"), { icon: "check", variant: "outline", small: true, onclick: async () => {
-        const out = await H.api("/api/proposals/approve-all", { body: {} });
-        if (out.failed.length) H.toast(out.failed.map((f) => `#${f.id}: ${f.error}`).join("\n"), "error");
-        await loadInbox(); await H.refresh();
+      pending && list.length > 1 ? el("div.toolbar", null, el("span"), H.btn(t("approve_all"), { icon: "check", variant: "outline", small: true, onclick: async (e) => {
+        const b = e.currentTarget;
+        b.disabled = true;
+        try {
+          const out = await H.api("/api/proposals/approve-all", { body: {} });
+          if (out.failed.length) H.toast(out.failed.map((f) => `#${f.id}: ${f.error}`).join("\n"), "error");
+          await loadInbox(); await H.refresh(true);
+        } catch (err) { H.toast(err.message, "error"); b.disabled = false; }
       } })) : null);
+    if (hadFocus && !inboxBody.contains(document.activeElement)) {
+      (inboxBody.querySelector(".p-actions .btn.primary") || inboxBody.closest(".drawer")?.querySelector(".layer-head .btn"))?.focus({ preventScroll: true });
+    }
   }
   H.openInbox = function () {
     inboxBody = el("div.inbox");
@@ -318,7 +376,7 @@
   H.openSettings = function () {
     const s = H.state.settings;
     const f = {
-      project_title: H.input(s.project_title), language: H.select(s.language, [["zh", "繁體中文"], ["en", "English"]]),
+      project_title: H.input(s.project_title), language: H.select(H.lang, [["zh", "繁體中文"], ["en", "English"]]),
       paperread_url: H.input(s.paperread_url), paperread_library: H.input(s.paperread_library),
       reference_folders: H.textarea((s.reference_folders || []).join("\n"), { rows: 3, placeholder: "/Users/me/Zotero/storage\nD:\\Papers" }),
       watch_folders: el("input", { type: "checkbox", checked: !!s.watch_folders }),

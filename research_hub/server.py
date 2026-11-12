@@ -73,8 +73,10 @@ class App:
             return None
         names = ", ".join(f["name"] for f in fresh[:5]) + (" …" if len(fresh) > 5 else "")
         try:
-            return self.store.propose("folder-watcher", f"{len(fresh)} new file(s) in reference folders",
-                                      ops, f"Found: {names}")
+            zh = settings.get("language") != "en"
+            return self.store.propose("folder-watcher",
+                                      f"文獻資料夾有 {len(fresh)} 個新檔案" if zh else f"{len(fresh)} new file(s) in reference folders",
+                                      ops, (f"找到：{names}" if zh else f"Found: {names}"))
         except ValidationError:
             return None
 
@@ -183,10 +185,16 @@ def make_handler(app: App):
             lang = lang or settings.get("language") or "zh"
             html = html.replace("{{TOKEN}}", app.token).replace("{{LANG}}", "en" if lang == "en" else "zh")
             html = html.replace("{{HTML_LANG}}", "en" if lang == "en" else "zh-Hant-TW").replace("{{VERSION}}", __version__)
+            en = lang == "en"
+            for key, zh_text, en_text in (("TITLE", "研究進度中樞 · Research Hub", "Research Hub · 研究進度中樞"),
+                                          ("SKIP", "跳到主要內容", "Skip to content"),
+                                          ("PIPELINE", "研究流程", "Research pipeline"),
+                                          ("NOSCRIPT", "此頁面需要啟用 JavaScript。", "Research Hub needs JavaScript.")):
+                html = html.replace("{{" + key + "}}", en_text if en else zh_text)
             self._send(200, html.encode("utf-8"), "text/html; charset=utf-8", {
                 "Cache-Control": "no-store",
-                "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-                                           "font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; "
+                "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+                                           "font-src 'self'; script-src 'self'; connect-src 'self'; "
                                            "frame-src 'self'; object-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
             })
 
@@ -424,9 +432,13 @@ def make_handler(app: App):
                 ops, stats = integ.paperread_sync_ops(items, snap["papers"], snap["variables"])
                 if not ops:
                     return self._json(200, {"proposal": None, "stats": stats})
-                proposal = store.propose("PaperRead sync", f"PaperRead: {stats['new']} new, {stats['status']} status, "
-                                         f"{stats['variables']} variables", ops,
-                                         "Papers, reading status and variables found in the PaperRead library.")
+                if settings.get("language") == "en":
+                    title = f"PaperRead: {stats['new']} new, {stats['status']} status, {stats['variables']} variables"
+                    summary = "Papers, reading status and variables found in the PaperRead library."
+                else:
+                    title = f"PaperRead：新文獻 {stats['new']} 篇、狀態更新 {stats['status']} 筆、變數 {stats['variables']} 個"
+                    summary = "從 PaperRead 文獻庫找到的論文、閱讀狀態與研究變數。"
+                proposal = store.propose("PaperRead sync", title, ops, summary)
                 return self._json(200, {"proposal": proposal, "stats": stats})
             if path == "/api/scripts/run":
                 settings = store.settings()
