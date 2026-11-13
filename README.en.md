@@ -109,7 +109,7 @@ In **Research core → Research model**, choose **From my writing** and paste or
 
 ### PROCESS model templates
 
-The Research model tab offers 26 common models by their PROCESS number (Hayes): moderation (1–3), mediation (4, 6) and conditional process models (5, 7–22, 28, 29, 58, 59), with preview and one-click apply, including three-way interactions and several mediators. Diagrams are drawn by the hub from the model structure; check Hayes (2022), Appendix A, before analysing. Models 60–76 and 80–92 are not included.
+The Research model tab offers 56 models by their PROCESS number (Hayes): moderation (1–3), mediation (4, 6), conditional process models (5, 7–22, 28, 29, 58–76), parallel-plus-serial mediation (80–82) and moderated serial mediation (83–92), with preview and one-click apply, including three-way interactions. Diagrams are drawn by the hub from the model structure; check Hayes (2022), Appendix A, before analysing.
 
 ## PowerPoint export
 
