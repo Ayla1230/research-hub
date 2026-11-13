@@ -926,6 +926,11 @@ def serve(store: Store, host: str = "127.0.0.1", port: int = 8770, *, open_brows
     if watch:
         threading.Thread(target=app.watch_loop, daemon=True).start()
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{httpd.server_address[1]}/"
+    for stream in (sys.stdout, sys.stderr):  # a console that cannot show a character must not stop the server
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     print(f"Research Hub {__version__} · data: {store.root}")
     print(f"Dashboard: {url}   (中文 {url}zh/ · English {url}en/)")
     if open_browser:
