@@ -2,7 +2,7 @@
 (function () {
   const H = window.H;
   const { el, t } = H;
-  const KIND_ICON = { database: "database", folder: "folder", mcp: "plug", code: "code", link: "link", paperread: "book" };
+  const KIND_ICON = { database: "database", folder: "folder", mcp: "plug", code: "code", link: "link" };
 
   /* ================= resources ================= */
   H.resourceRow = function (r) {
@@ -80,7 +80,7 @@
           try { scan = await H.api("/api/scan"); H.render.hub(); } catch (e) { H.toast(e.message, "error"); }
         } }),
         H.btn(t("scan_new"), { icon: "inbox", small: true, variant: "ghost", onclick: async () => {
-          try { const out = await H.api("/api/watch/scan", { body: {} }); H.toast(out.proposal ? t("pr_synced") : t("nothing_new"), out.proposal ? "ok" : "info"); }
+          try { const out = await H.api("/api/watch/scan", { body: {} }); H.toast(out.proposal ? t("sent_inbox") : t("nothing_new"), out.proposal ? "ok" : "info"); }
           catch (e) { H.toast(e.message, "error"); }
         } }));
       body.append(row);
@@ -103,28 +103,6 @@
       }
     }
     return card("folder", t("ref_folders"), null, body);
-  }
-
-  let prStatus = null;
-  async function loadPr() { try { prStatus = await H.api("/api/paperread/status"); } catch (e) { prStatus = { error: e.message }; } H.render.hub(); }
-  function paperreadCard() {
-    if (!prStatus) setTimeout(loadPr, 0);
-    const s = H.state.settings;
-    const online = prStatus && prStatus.online;
-    return card("book", t("paperread"), s.paperread_url, el("div", null,
-      el("div.status-line", null, el("span.dot." + (online ? "done" : "todo")), prStatus ? (online ? t("pr_online") : t("pr_offline")) : "…",
-        el("span.sep", null, "·"), prStatus ? (prStatus.library_found ? t("pr_library", { n: prStatus.count }) : t("pr_nolib")) : ""),
-      el("code.path", null, s.paperread_library),
-      el("div.toolbar", null,
-        el("a.btn.outline.sm", { href: H.safeUrl(s.paperread_url) || "#", target: "_blank", rel: "noopener" }, H.icon("external", 14), el("span", null, t("pr_open"))),
-        H.btn(t("pr_sync"), { icon: "refresh", small: true, variant: "primary", onclick: async () => {
-          try {
-            const out = await H.api("/api/paperread/sync", { body: {} });
-            const extra = out.skipped && out.skipped.length ? " · " + t("pr_skipped", { n: out.skipped.length }) : "";
-            H.toast((out.proposal ? t("pr_synced") : t("pr_uptodate")) + extra, "ok", out.proposal ? { label: t("inbox"), fn: H.openInbox } : null); loadPr();
-          }
-          catch (e) { H.toast(e.message, "error"); }
-        } }))), H.btn(t("scan"), { icon: "refresh", iconOnly: true, small: true, variant: "ghost", onclick: loadPr }));
   }
 
   let agentCfg = null;
@@ -174,6 +152,25 @@
     return body;
   };
 
+  let usage = null;
+  async function loadUsage() { try { usage = await H.api("/api/usage"); } catch (_) { usage = null; } H.render.hub(); }
+  H.loadUsage = loadUsage;
+  const PROVIDER_LABEL = { openalex: "OpenAlex", wiley: "Wiley (Crossref)", semantic: "Semantic Scholar", wos: "Web of Science", ai: "AI" };
+  function usageCard() {
+    if (!usage) { setTimeout(loadUsage, 0); return card("activity", t("usage"), null, el("p.empty.sm", null, "…")); }
+    const rows = Object.entries(usage.providers).map(([id, u]) => {
+      const pct = u.limit ? Math.min(100, Math.round((u.requests / u.limit) * 100)) : 0;
+      const off = (id === "wos" && !H.state.settings.wos_api_key_set) || (id === "ai" && !usage.ai);
+      return el("li.usage-row" + (off ? ".off" : ""), null,
+        el("span.usage-name", null, PROVIDER_LABEL[id] || id),
+        el("span.usage-bar", { role: "img", "aria-label": `${u.requests}/${u.limit || "∞"}` }, el("span" + (pct >= 90 ? ".hot" : ""), { style: { width: pct + "%" } })),
+        el("span.mono.usage-num", null, off ? t("not_set") : `${u.requests} / ${u.limit || "∞"}` + (id === "ai" && u.tokens ? ` · ${u.tokens.toLocaleString()} tok` : "")));
+    });
+    const h = Math.floor(usage.resets_in_minutes / 60), m = usage.resets_in_minutes % 60;
+    return card("activity", t("usage"), t("usage_hint", { h, m }), el("ul.usage", null, rows),
+      H.btn(t("scan"), { icon: "refresh", iconOnly: true, small: true, variant: "ghost", onclick: loadUsage }));
+  }
+
   function filesCard() {
     const files = H.state.files.slice(0, 30);
     return card("file", t("all_files"), null, el("div", null, H.dropzone(""), files.length ? el("ul.file-list", null, files.map((f) => {
@@ -185,7 +182,7 @@
   }
 
   function linksCard() {
-    const list = H.state.resources.filter((r) => ["link", "folder", "code", "paperread"].includes(r.kind));
+    const list = H.state.resources.filter((r) => ["link", "folder", "code"].includes(r.kind));
     return card("link", t("other_links"), null, list.length ? el("ul.res-list", null, list.map(H.resourceRow)) : el("p.empty.sm", null, t("none")),
       H.btn(t("add"), { icon: "plus", small: true, variant: "ghost", onclick: () => H.editResource(null) }));
   }
@@ -194,8 +191,8 @@
   H.render.hub = function () {
     const root = document.getElementById("hub");
     H.put(root, 
-      el("div.band-head", null, el("div", null, el("div.eyebrow", null, "03", el("span", null, "/"), t("hub")), el("h2", null, t("hub")), el("p.sub", null, t("hub_hint")))),
-      el("div.hub-grid", null, databasesCard(), paperreadCard(), foldersCard(), mcpCard(),
+      el("div.band-head", null, el("div", null, el("div.eyebrow", null, "04", el("span", null, "/"), t("hub")), el("h2", null, t("hub")), el("p.sub", null, t("hub_hint")))),
+      el("div.hub-grid", null, databasesCard(), usageCard(), foldersCard(), mcpCard(),
         card("code", t("code"), null, H.codeCard()), filesCard(), linksCard()));
   };
   H.refreshScripts = loadScripts;
@@ -208,7 +205,7 @@
     const ACTOR = (a) => (a === "user" ? t("a_user") : a === "system" ? t("a_system") : a.replace(" (approved)", " ✓"));
     const actorIcon = (a) => (a === "user" ? "edit" : a === "system" ? "settings" : a.includes("approved") ? "check" : a === "python" ? "code" : "bot");
     H.put(root, 
-      el("div.band-head", null, el("div", null, el("div.eyebrow", null, "04", el("span", null, "/"), t("activity")), el("h2", null, t("activity")))),
+      el("div.band-head", null, el("div", null, el("div.eyebrow", null, "05", el("span", null, "/"), t("activity")), el("h2", null, t("activity")))),
       items.length ? el("ol.timeline", null, items.map((a) => el("li", null,
         el("span.tl-ic", null, H.icon(actorIcon(a.actor), 13)),
         el("div.tl-main", null, el("span.tl-actor.mono", null, ACTOR(a.actor)),
@@ -240,9 +237,10 @@
     };
     const name = (entity, id) => {
       if (typeof id === "string" && id.startsWith("$")) return refTitle(id);
-      const list = { stage: s.stages, task: s.tasks, rq: s.rqs, variable: s.variables, paper: s.papers, resource: s.resources }[entity] || [];
+      const list = { stage: s.stages, task: s.tasks, rq: s.rqs, variable: s.variables, paper: s.papers, resource: s.resources, relation: s.relations || [] }[entity] || [];
       const it = typeof id === "number" ? H.by(list, id) : null;
       if (!it) return typeof id === "string" ? id : `#${id}`;
+      if (entity === "relation") { const a = H.by(s.variables, it.source_id), b = H.by(s.variables, it.target_id); return `${it.label ? it.label + " " : ""}${a ? a.symbol : "?"} → ${b ? b.symbol : "?"}`; }
       return entity === "stage" ? H.stageTitle(it) : it.title || (it.symbol ? `${it.symbol} ${H.varName(it)}` : "") || it.code || it.name || `#${id}`;
     };
     if (op.op === "link" || op.op === "unlink") {
@@ -329,7 +327,7 @@
     const approve = H.btn(p.ops.length > 1 ? t("approve_sel") : t("approve"), { icon: "check", variant: "primary", small: true, onclick: () => act(true, btns) });
     btns.push(reject, approve);
     return el("li.proposal." + p.status, null,
-      el("div.p-head", null, el("span.p-src", null, H.icon(p.source.includes("PaperRead") ? "book" : p.source.includes("folder") ? "folder" : "bot", 14), p.source),
+      el("div.p-head", null, el("span.p-src", null, H.icon(p.source.includes("literature") ? "book" : p.source.includes("folder") ? "folder" : "bot", 14), p.source),
         el("time.mono.muted", { datetime: p.created }, H.when(p.created)), !pending ? el("span.pill." + p.status, null, t(p.status)) : null),
       el("h3.p-title", null, p.title),
       p.summary ? el("p.p-summary", null, p.summary) : null,
@@ -381,20 +379,58 @@
     const s = H.state.settings;
     const f = {
       project_title: H.input(s.project_title), language: H.select(H.lang, [["zh", "繁體中文"], ["en", "English"]]),
-      paperread_url: H.input(s.paperread_url), paperread_library: H.input(s.paperread_library),
       reference_folders: H.textarea((s.reference_folders || []).join("\n"), { rows: 3, placeholder: "/Users/me/Zotero/storage\nD:\\Papers" }),
       watch_folders: el("input", { type: "checkbox", checked: !!s.watch_folders }),
       code_dir: H.input(s.code_dir, { placeholder: "/Users/me/thesis-analysis" }),
       allow_code_run: el("input", { type: "checkbox", checked: !!s.allow_code_run }),
       code_timeout: H.input(s.code_timeout, { type: "number", min: 10, max: 86400 }),
       openalex_mailto: H.input(s.openalex_mailto, { type: "email" }),
+      project_deadline: el("input.inp", { type: "date", value: s.project_deadline || "" }),
+      project_goal: H.textarea(s.project_goal, { rows: 2, placeholder: t("ci_goal_ph") }),
+      auto_progress_from_tasks: el("input", { type: "checkbox", checked: !!s.auto_progress_from_tasks }),
+      archive_rules: H.textarea((s.archive_rules || []).join("\n"), { rows: 3, placeholder: "survey => data\nchapter2 => literature" }),
+      quota_openalex: H.input(s.quota_openalex, { type: "number", min: 0 }), quota_wiley: H.input(s.quota_wiley, { type: "number", min: 0 }),
+      quota_semantic: H.input(s.quota_semantic, { type: "number", min: 0 }), quota_wos: H.input(s.quota_wos, { type: "number", min: 0 }),
+      ai_provider: H.select(s.ai_provider || "", [["", t("ai_off")], ["gemini", "Google Gemini（免費額度 free tier）"], ["groq", "Groq（free tier）"],
+        ["openrouter", "OpenRouter（:free models）"], ["ollama", "Ollama（本機 local, 免費 free）"], ["custom", t("ai_custom")]]),
+      ai_base_url: H.input(s.ai_base_url, { placeholder: t("ai_default") }), ai_model: H.input(s.ai_model, { placeholder: t("ai_default") }),
+      quota_ai: H.input(s.quota_ai, { type: "number", min: 0 }), quota_ai_tokens: H.input(s.quota_ai_tokens, { type: "number", min: 0 }),
     };
+    // Secrets are write-only: blank means "keep the saved key".
+    const secrets = {
+      ai_api_key: H.input("", { type: "password", autocomplete: "off", placeholder: s.ai_api_key_set ? t("key_saved") : t("key_paste") }),
+      wos_api_key: H.input("", { type: "password", autocomplete: "off", placeholder: s.wos_api_key_set ? t("key_saved") : t("key_paste") }),
+    };
+    const clearKey = (k) => s[k + "_set"] ? H.btn(t("key_clear"), { small: true, variant: "danger-ghost", onclick: async () => {
+      try { await H.api("/api/settings", { body: { [k]: "" } }); secrets[k].placeholder = t("key_paste"); H.toast(t("saved"), "ok"); await H.refresh(true); } catch (e) { H.toast(e.message, "error"); }
+    } }) : null;
+    const providers = new Set(s.watch_providers || []);
+    const providerToggles = el("div.ci-providers", null, [["openalex", "OpenAlex"], ["wiley", "Wiley (Crossref)"], ["semantic", "Semantic Scholar"], ["wos", "Web of Science"]].map(([id, label]) => {
+      const box = el("input", { type: "checkbox", checked: providers.has(id), onchange: () => (box.checked ? providers.add(id) : providers.delete(id)) });
+      return el("label.ci-prov", null, box, el("span", null, label));
+    }));
     const toggle = (input, label) => el("label.toggle", null, input, el("span.track-t", null, el("span.knob")), el("span", null, label));
     const body = el("div.settings", null,
       el("h3.mini", null, t("s_general")),
       el("div.form-grid", null, H.field(t("s_project_title"), f.project_title), H.field(t("language"), f.language)),
+      el("h3.mini", null, t("s_tracking")),
+      el("div.form-grid", null, H.field(t("ci_deadline"), f.project_deadline), el("div"),
+        el("div.span2", null, H.field(t("s_project_goal"), f.project_goal)),
+        el("div.span2", null, toggle(f.auto_progress_from_tasks, t("s_auto_progress"))),
+        el("div.span2", null, H.field(t("s_archive_rules"), f.archive_rules, t("s_archive_hint")))),
+      el("h3.mini", null, t("s_sources")),
+      el("p.hint", null, t("s_sources_hint")), providerToggles,
+      el("div.form-grid.q4", null, H.field("OpenAlex / " + t("per_day"), f.quota_openalex), H.field("Wiley / " + t("per_day"), f.quota_wiley),
+        H.field("Semantic Scholar / " + t("per_day"), f.quota_semantic), H.field("WoS / " + t("per_day"), f.quota_wos)),
+      el("div.form-grid", null, el("div.span2", null, H.field("Web of Science Starter API key", secrets.wos_api_key, t("wos_hint"))), el("div.span2", null, clearKey("wos_api_key"))),
+      el("h3.mini", null, t("s_ai")),
+      el("p.hint", null, t("s_ai_hint")),
+      el("div.form-grid", null, H.field(t("ai_provider"), f.ai_provider), H.field(t("ai_model"), f.ai_model),
+        el("div.span2", null, H.field(t("ai_base_url"), f.ai_base_url)),
+        el("div.span2", null, H.field("API key", secrets.ai_api_key, t("ai_key_hint"))), el("div.span2", null, clearKey("ai_api_key")),
+        H.field(t("ai_quota"), f.quota_ai), H.field(t("ai_token_quota"), f.quota_ai_tokens)),
       el("h3.mini", null, t("s_integrations")),
-      el("div.form-grid", null, H.field(t("s_pr_url"), f.paperread_url), H.field(t("s_pr_lib"), f.paperread_library),
+      el("div.form-grid", null,
         el("div.span2", null, H.field(t("s_ref_folders"), f.reference_folders)), el("div.span2", null, toggle(f.watch_folders, t("s_watch"))),
         H.field(t("s_code_dir"), f.code_dir), H.field(t("s_timeout"), f.code_timeout),
         el("div.span2", null, toggle(f.allow_code_run, t("s_allow_run"))),
@@ -406,12 +442,14 @@
     const save = async () => {
       const patch = {};
       for (const [k, n] of Object.entries(f)) patch[k] = n.type === "checkbox" ? n.checked : n.value;
+      patch.watch_providers = [...providers];
+      for (const [k, n] of Object.entries(secrets)) if (n.value.trim()) patch[k] = n.value.trim();
       try {
         await H.api("/api/settings", { body: patch });
         const langChanged = patch.language !== H.lang;
         H.closeLayer();
         if (langChanged) { location.href = "/" + patch.language + "/"; return; }
-        scripts = null; prStatus = null; scan = null;
+        scripts = null; scan = null; usage = null;
         await H.refresh();
         H.toast(t("saved"), "ok");
       } catch (e) { H.toast(e.message, "error"); }

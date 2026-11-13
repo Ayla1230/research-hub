@@ -3,7 +3,7 @@
   const H = window.H;
   const t = H.t;
   H.token = document.querySelector('meta[name="hub-token"]').content;
-  H.ui = { openStage: null, coreTab: "rq", editPipeline: false, litFilter: "", litStatus: "all", inboxTab: "pending" };
+  H.ui = { openStage: null, coreTab: "story", editPipeline: false, litFilter: "", litStatus: "all", inboxTab: "pending" };
 
   /* ---------- DOM ---------- */
   H.el = function el(tag, attrs, ...kids) {
@@ -44,6 +44,7 @@
 
   /* ---------- Icons (24px stroke, Lucide-style geometry, drawn inline) ---------- */
   const P = {
+    menu: "M4 6h16M4 12h16M4 18h16", home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
     check: "M20 6 9 17l-5-5", plus: "M12 5v14M5 12h14", x: "M18 6 6 18M6 6l12 12",
     inbox: "M22 12h-6l-2 3h-4l-2-3H2M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z",
     settings: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z",
@@ -236,6 +237,18 @@
   };
   /* Only http(s) links from user/agent data become hrefs (no javascript:, data:, file:). */
   H.safeUrl = (u) => (/^https?:\/\//i.test(String(u || "").trim()) ? String(u).trim() : null);
+  /* Save a file the page generated. Non-ASCII names go through the local server so every
+     browser receives the proper UTF-8 filename (some ignore it on in-page blob links). */
+  H.saveBlob = async function (blob, name) {
+    if (/^[\x20-\x7e]+$/.test(name)) {
+      const url = URL.createObjectURL(blob);
+      const a = el("a", { href: url, download: name }); document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      return;
+    }
+    const out = await H.api("/api/exports", { body: blob, headers: { "X-Filename": encodeURIComponent(name), "Content-Type": "application/octet-stream" } });
+    const a = el("a", { href: out.url + "?token=" + encodeURIComponent(H.token) }); document.body.append(a); a.click(); a.remove();
+  };
   H.size = (n) => (n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(0) + " KB" : (n / 1048576).toFixed(1) + " MB");
   H.stageTitle = (s) => (H.lang === "en" ? s.title_en || s.title_zh : s.title_zh || s.title_en);
   H.stageDesc = (s) => (H.lang === "en" ? s.desc_en || s.desc_zh : s.desc_zh || s.desc_en);

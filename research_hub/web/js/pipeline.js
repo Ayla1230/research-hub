@@ -50,7 +50,8 @@
       el("span.node-meta", null,
         el("span.dot." + stage.status), t("st_" + stage.status),
         tasks.length ? el("span.sep", null, "·") : null, tasks.length ? `${done}/${tasks.length}` : null),
-      due ? el("span.node-due." + (due.kind || "plain"), null, due.text) : null);
+      due ? el("span.node-due." + (due.kind || "plain"), null, due.text) : null,
+      (() => { const p = H.pace(stage); return p && p.kind !== "on" ? el("span.node-pace." + p.kind, null, H.paceLabel(p)) : null; })());
 
     const tools = H.ui.editPipeline ? el("div.node-tools", null,
       H.btn(t("move_left"), { icon: "chevL", iconOnly: true, small: true, variant: "ghost", disabled: index === 0, onclick: () => move(stage, -1), dataset: { fkey: "move-l-" + stage.id } }),
@@ -256,17 +257,23 @@
         el("div.sp-title", null,
           el("div.eyebrow", null, t("stage_of", { i: index + 1, n: stages.length }), stage.key ? el("span.mono.key", null, stage.key) : null),
           el("h3", null, H.stageTitle(stage)),
-          H.stageDesc(stage) ? el("p.lead", null, H.stageDesc(stage)) : null),
+          H.stageDesc(stage) ? el("p.lead", null, H.stageDesc(stage)) : null,
+          stage.goal ? el("p.sp-goal", null, H.icon("flag", 14), el("span.lbl", null, t("ci_goal")), stage.goal) : null),
         el("div.sp-actions", null,
+          H.btn(t("ci_report"), { icon: "upload", variant: "primary", small: true, onclick: () => H.openCheckin({ stageId: stage.id }) }),
           H.btn(t("stage_settings"), { icon: "settings", iconOnly: true, variant: "ghost", onclick: () => stageSettings(stage) }),
           H.btn(t("close"), { icon: "x", iconOnly: true, variant: "ghost", onclick: () => { H.ui.openStage = null; H.render.pipeline(); document.querySelector(`.node-btn[data-stage="${stage.id}"]`)?.focus(); } }))),
       el("div.sp-controls", null, statusControl(stage), progressControl(stage),
+        (() => { const p = H.pace(stage); return p ? el("span.pace-badge." + p.kind, { title: t("pace_expected", { n: p.expected }) }, H.paceLabel(p),
+          el("span.mono", null, " · " + t("pace_expected", { n: p.expected }))) : null; })(),
         el("div.dates", null, dateControl(stage, "start_date", t("start_date")), dateControl(stage, "due_date", t("due_date")))),
       el("div.sp-grid", null,
         el("div.card.notes-card", null, el("div.card-head", null, el("h4", null, t("notes")), saveState), notes),
         taskList(stage),
         filesCard(stage),
-        resourcesCard(stage)),
+        resourcesCard(stage),
+        el("div.card.log-card", null, el("div.card-head", null, el("h4", null, t("log_title")),
+          H.btn(t("ci_report"), { icon: "plus", small: true, variant: "ghost", onclick: () => H.openCheckin({ stageId: stage.id }) })), H.progressLog(stage))),
       mod ? el("div.sp-module", null, el("div.module-head", null, el("span.eyebrow", null, t("module")), el("h4", null, t("mod_" + stage.module))), mod) : null);
   }
 

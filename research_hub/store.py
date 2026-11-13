@@ -13,19 +13,34 @@ import secrets
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from .defaults import DEFAULT_RESOURCES, DEFAULT_SETTINGS, DEFAULT_STAGES
+from .defaults import DEFAULT_RESOURCES, DEFAULT_SETTINGS, DEFAULT_STAGES, SECRET_SETTINGS
 
 SCHEMA_VERSION = 1
 
 STAGE_STATUS = ("todo", "active", "review", "done", "blocked")
+PROVIDERS = ("openalex", "wiley", "semantic", "wos")
 RQ_STATUS = ("draft", "refined", "answered")
 VAR_ROLES = ("iv", "dv", "med", "mod", "ctrl", "other")
 PAPER_STATUS = ("candidate", "to_read", "reading", "done", "excluded")
-RESOURCE_KINDS = ("database", "folder", "mcp", "code", "link", "paperread")
+RESOURCE_KINDS = ("database", "folder", "mcp", "code", "link")
+REMOVED_SETTINGS = ("paperread_url", "paperread_library")
 MODULES = ("", "literature", "rq", "variables", "code", "writing")
+RELATION_KINDS = ("effect", "moderates")
+# Lange & Pfarrer (2017): the five core building blocks of a theory paper ("5C").
+FIVE_C = ("common", "complication", "concern", "course", "contribution")
+COMPLICATION_TYPES = ("", "problem", "puzzle", "twist")
+# Bono & McNamara (2011), "Publishing in AMJ — Part 2: Research design"
+MEASURE_SOURCES = ("", "self", "supervisor", "peer", "objective", "manipulated", "other")
+DESIGN_PURPOSES = ("", "describe", "change", "causal")
+DESIGN_TYPES = ("", "cross_sectional", "longitudinal", "experiment")
+CHECK_STATUS = ("", "ok", "issue")
+QUESTION_KINDS = ("past", "predicted", "practice")
+QUESTION_STATUS = ("new", "practiced", "mastered")
+DIFFICULTY = ("", "easy", "medium", "hard")
+SIGNS = ("", "+", "-")
 EVIDENCE = ("", "supports", "contradicts", "mixed", "defines", "measures", "mentions")
 
 # Field specs: name -> (type, extra). Types: str, text, int, bool, enum, ref, json
@@ -38,7 +53,7 @@ ENTITIES: dict[str, dict] = {
             "desc_zh": ("text", None), "desc_en": ("text", None),
             "status": ("enum", STAGE_STATUS), "progress": ("int", (0, 100)),
             "start_date": ("date", None), "due_date": ("date", None),
-            "notes": ("text", None), "module": ("enum", MODULES),
+            "notes": ("text", None), "module": ("enum", MODULES), "goal": ("text", None),
         },
         "required": ("title_zh",),
     },
@@ -64,6 +79,10 @@ ENTITIES: dict[str, dict] = {
             "symbol": ("str", None), "name_zh": ("str", None), "name_en": ("str", None),
             "role": ("enum", VAR_ROLES), "definition": ("text", None),
             "measurement": ("text", None), "notes": ("text", None), "position": ("int", None),
+            # research design: who reports it and when (common method variance, temporal order)
+            "measure_source": ("enum", MEASURE_SOURCES), "wave": ("int", (0, 20)),
+            # control variables: Becker (2005) as cited by Bono & McNamara — related to Y, to X, and not a core/mediating variable
+            "ctrl_y": ("bool", None), "ctrl_x": ("bool", None), "ctrl_not_core": ("bool", None), "rationale": ("text", None),
         },
         "required": ("symbol",),
     },
@@ -74,10 +93,68 @@ ENTITIES: dict[str, dict] = {
             "venue": ("str", None), "doi": ("str", None), "url": ("str", None),
             "abstract": ("text", None), "local_path": ("str", None), "citekey": ("str", None),
             "source": ("str", None), "status": ("enum", PAPER_STATUS), "rating": ("int", (0, 5)),
-            "tags": ("str", None), "notes": ("text", None), "paperread_id": ("str", None),
+            "tags": ("str", None), "notes": ("text", None),
             "openalex_id": ("str", None),
+            # 5C reading notes: answer the five questions for every paper you read
+            "c_common": ("text", None), "c_complication": ("text", None), "c_concern": ("text", None),
+            "c_course": ("text", None), "c_contribution": ("text", None),
+            "complication_type": ("enum", COMPLICATION_TYPES),
+            "story_role": ("enum", ("",) + FIVE_C),  # which block of MY story this paper supports
+            "folder": ("str", None),  # reading-notes folder, e.g. a course week or an exam topic
+            "review_date": ("date", None), "review_interval": ("int", (0, 365)),
         },
         "required": ("title",),
+    },
+    "design": {  # one research-design profile per workspace (fixed row, key "main")
+        "table": "design",
+        "fields": {
+            "key": ("str", None), "purpose": ("enum", DESIGN_PURPOSES), "design": ("enum", DESIGN_TYPES),
+            "waves": ("int", (0, 20)), "sample": ("text", None), "limitations": ("text", None),
+            **{f"q{i}_status": ("enum", CHECK_STATUS) for i in range(1, 6)},
+            **{f"q{i}_note": ("text", None) for i in range(1, 6)},
+        },
+        "required": ("key",),
+        "fixed": True,
+    },
+    "topic": {  # the thesis title and why it is worth doing (fixed row, key "main")
+        "table": "topic",
+        "fields": {"key": ("str", None), "title": ("str", None), "title_en": ("str", None), "reason": ("text", None),
+                   "benefit": ("text", None), "audience": ("str", None), "checked": ("text", None)},
+        "required": ("key",),
+        "fixed": True,
+    },
+    "question": {  # exam preparation: past, predicted and practice essay questions, grouped in folders
+        "table": "questions",
+        "fields": {
+            "folder": ("str", None), "kind": ("enum", QUESTION_KINDS), "text": ("text", None), "source": ("str", None),
+            "year": ("int", (0, 3000)), "difficulty": ("enum", DIFFICULTY), "analysis": ("text", None),
+            "outline": ("text", None), "answer": ("text", None), "minutes": ("int", (0, 600)),
+            "score": ("int", (0, 100)), "status": ("enum", QUESTION_STATUS), "paper_id": ("int", None),
+            "feedback": ("text", None), "position": ("int", None),
+            "review_date": ("date", None), "review_interval": ("int", (0, 365)),  # spaced review: next date, current gap in days
+        },
+        "required": ("text",),
+    },
+    "attempt": {  # one handed-in practice answer; kept so progress on a question can be seen over time
+        "table": "attempts",
+        "fields": {"question_id": ("ref", "question"), "answer": ("text", None), "score": ("int", (0, 100)), "coverage": ("int", (0, 100)),
+                   "feedback": ("text", None), "seconds": ("int", (0, 86400))},
+        "required": ("question_id",),
+    },
+    "story": {  # my own research story, one row per C (fixed: updated, never created or deleted)
+        "table": "story",
+        "fields": {"key": ("enum", FIVE_C), "sentence": ("text", None), "notes": ("text", None)},
+        "required": ("key",),
+        "fixed": True,
+    },
+    "relation": {  # a hypothesised path in the research model, e.g. H1: X1 → Y1 (+)
+        "table": "relations",
+        "fields": {
+            "source_id": ("ref", "variable"), "target_id": ("ref", "variable"),
+            "kind": ("enum", RELATION_KINDS), "moderates_id": ("ref?", "relation"),
+            "sign": ("enum", SIGNS), "label": ("str", None), "note": ("text", None), "position": ("int", None),
+        },
+        "required": ("source_id", "target_id"),
     },
     "resource": {
         "table": "resources",
@@ -95,6 +172,15 @@ ENTITIES: dict[str, dict] = {
         },
         "required": ("name", "stored"),
         "internal": True,  # created only by the upload endpoint, never through proposals
+    },
+    "update": {  # progress log: one entry per check-in ("where am I now?")
+        "table": "updates",
+        "fields": {
+            "stage_id": ("ref?", "stage"), "note": ("text", None), "progress_before": ("int", (0, 100)),
+            "progress_after": ("int", (0, 100)), "files": ("text", None), "source": ("str", None),
+        },
+        "required": ("note",),
+        "internal": True,  # written by the check-in endpoint
     },
 }
 
@@ -141,7 +227,7 @@ CREATE TABLE IF NOT EXISTS papers (
   url TEXT NOT NULL DEFAULT '', abstract TEXT NOT NULL DEFAULT '', local_path TEXT NOT NULL DEFAULT '',
   citekey TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'manual', status TEXT NOT NULL DEFAULT 'to_read',
   rating INTEGER NOT NULL DEFAULT 0, tags TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
-  paperread_id TEXT NOT NULL DEFAULT '', openalex_id TEXT NOT NULL DEFAULT '',
+  openalex_id TEXT NOT NULL DEFAULT '',
   created TEXT NOT NULL, updated TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS resources (
@@ -182,6 +268,52 @@ CREATE TABLE IF NOT EXISTS activity (
   entity TEXT NOT NULL DEFAULT '', entity_id INTEGER, summary TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS seen_files (path TEXT PRIMARY KEY, at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS updates (
+  id INTEGER PRIMARY KEY, stage_id INTEGER REFERENCES stages(id) ON DELETE SET NULL, note TEXT NOT NULL DEFAULT '',
+  progress_before INTEGER NOT NULL DEFAULT 0, progress_after INTEGER NOT NULL DEFAULT 0, files TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'user', created TEXT NOT NULL, updated TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS relations (
+  id INTEGER PRIMARY KEY, source_id INTEGER NOT NULL REFERENCES variables(id) ON DELETE CASCADE,
+  target_id INTEGER NOT NULL REFERENCES variables(id) ON DELETE CASCADE, kind TEXT NOT NULL DEFAULT 'effect',
+  moderates_id INTEGER REFERENCES relations(id) ON DELETE SET NULL, sign TEXT NOT NULL DEFAULT '',
+  label TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0,
+  created TEXT NOT NULL, updated TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS story (
+  id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, sentence TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+  created TEXT NOT NULL, updated TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS topic (
+  id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, title TEXT NOT NULL DEFAULT '', title_en TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT '', benefit TEXT NOT NULL DEFAULT '', audience TEXT NOT NULL DEFAULT '',
+  checked TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, updated TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS questions (
+  id INTEGER PRIMARY KEY, folder TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'past', text TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT '', year INTEGER NOT NULL DEFAULT 0, difficulty TEXT NOT NULL DEFAULT '',
+  analysis TEXT NOT NULL DEFAULT '', outline TEXT NOT NULL DEFAULT '', answer TEXT NOT NULL DEFAULT '',
+  minutes INTEGER NOT NULL DEFAULT 0, score INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'new',
+  paper_id INTEGER NOT NULL DEFAULT 0, feedback TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL DEFAULT 0,
+  created TEXT NOT NULL, updated TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS attempts (
+  id INTEGER PRIMARY KEY, question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE, answer TEXT NOT NULL DEFAULT '',
+  score INTEGER NOT NULL DEFAULT 0, coverage INTEGER NOT NULL DEFAULT 0, feedback TEXT NOT NULL DEFAULT '', seconds INTEGER NOT NULL DEFAULT 0,
+  created TEXT NOT NULL, updated TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS design (
+  id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, purpose TEXT NOT NULL DEFAULT '', design TEXT NOT NULL DEFAULT '',
+  waves INTEGER NOT NULL DEFAULT 0, sample TEXT NOT NULL DEFAULT '', limitations TEXT NOT NULL DEFAULT '',
+  q1_status TEXT NOT NULL DEFAULT '', q2_status TEXT NOT NULL DEFAULT '', q3_status TEXT NOT NULL DEFAULT '',
+  q4_status TEXT NOT NULL DEFAULT '', q5_status TEXT NOT NULL DEFAULT '',
+  q1_note TEXT NOT NULL DEFAULT '', q2_note TEXT NOT NULL DEFAULT '', q3_note TEXT NOT NULL DEFAULT '',
+  q4_note TEXT NOT NULL DEFAULT '', q5_note TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, updated TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS usage (
+  day TEXT NOT NULL, provider TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, provider)
+);
 CREATE INDEX IF NOT EXISTS idx_tasks_stage ON tasks(stage_id);
 CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status);
 CREATE INDEX IF NOT EXISTS idx_activity_at ON activity(at);
@@ -190,6 +322,14 @@ CREATE INDEX IF NOT EXISTS idx_activity_at ON activity(at);
 
 class ValidationError(ValueError):
     """Raised for bad input; the message is shown to the user."""
+
+
+class QuotaError(ValidationError):
+    """Today's free quota for a provider is used up; it resets at local midnight."""
+
+    def __init__(self, provider: str, limit: int):
+        self.provider = provider
+        super().__init__(f"daily limit reached for {provider} ({limit}); it resets at midnight — change it in Settings")
 
 
 def now() -> str:
@@ -245,6 +385,35 @@ class Store:
         self.listeners: list = []  # callables(event: dict)
         with self.db() as db:
             db.executescript(SCHEMA)
+            cols = {r["name"] for r in db.execute("PRAGMA table_info(stages)")}
+            if "goal" not in cols:  # workspaces created by v1.0.0
+                db.execute("ALTER TABLE stages ADD COLUMN goal TEXT NOT NULL DEFAULT ''")
+            paper_cols = {r["name"] for r in db.execute("PRAGMA table_info(papers)")}
+            for col in ("c_common", "c_complication", "c_concern", "c_course", "c_contribution", "complication_type", "story_role"):
+                if col not in paper_cols:
+                    db.execute(f"ALTER TABLE papers ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+            if "folder" not in paper_cols:
+                db.execute("ALTER TABLE papers ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
+            for table in ("papers", "questions"):
+                have = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
+                if "review_date" not in have:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN review_date TEXT NOT NULL DEFAULT ''")
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN review_interval INTEGER NOT NULL DEFAULT 0")
+            stamp = now()
+            db.execute("INSERT OR IGNORE INTO topic (key, created, updated) VALUES ('main', ?, ?)", (stamp, stamp))
+            for key in FIVE_C:
+                db.execute("INSERT OR IGNORE INTO story (key, created, updated) VALUES (?, ?, ?)", (key, stamp, stamp))
+            db.execute("INSERT OR IGNORE INTO design (key, created, updated) VALUES ('main', ?, ?)", (stamp, stamp))
+            var_cols = {r["name"] for r in db.execute("PRAGMA table_info(variables)")}
+            for col, ddl in (("measure_source", "TEXT NOT NULL DEFAULT ''"), ("wave", "INTEGER NOT NULL DEFAULT 0"),
+                             ("ctrl_y", "INTEGER NOT NULL DEFAULT 0"), ("ctrl_x", "INTEGER NOT NULL DEFAULT 0"),
+                             ("ctrl_not_core", "INTEGER NOT NULL DEFAULT 0"), ("rationale", "TEXT NOT NULL DEFAULT ''")):
+                if col not in var_cols:
+                    db.execute(f"ALTER TABLE variables ADD COLUMN {col} {ddl}")
+            # v1.1 dropped the PaperRead integration: keep the data, drop what pointed at it.
+            db.execute(f"DELETE FROM settings WHERE k IN ({', '.join('?' * len(REMOVED_SETTINGS))})", REMOVED_SETTINGS)
+            db.execute("DELETE FROM resources WHERE kind='paperread' AND name='PaperRead' AND target='http://127.0.0.1:8765'")
+            db.execute("UPDATE resources SET kind='link' WHERE kind='paperread'")  # links the user added stay, as plain links
             if not db.execute("SELECT 1 FROM meta WHERE k='schema'").fetchone():
                 self._seed(db, "en" if lang == "en" else "zh")
 
@@ -304,7 +473,8 @@ class Store:
         for k, v in DEFAULT_SETTINGS.items():
             out.setdefault(k, v)
         if public:
-            out.pop("agent_token", None)
+            for key in SECRET_SETTINGS:
+                out[key + "_set"] = bool(out.pop(key, ""))
         return out
 
     def save_settings(self, patch: dict, actor: str = "user") -> dict:
@@ -333,10 +503,27 @@ class Store:
                 raise ValidationError("language must be zh or en")
             if k == "code_timeout":
                 v = max(10, min(86400, v))
-            if k == "paperread_url" and v and not re.match(r"^https?://[^\s/]+", v, re.I):
-                raise ValidationError("PaperRead URL must start with http:// or https://")
             if k == "openalex_mailto" and v and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", v):
                 raise ValidationError("OpenAlex contact must be an email address")
+            if k == "project_deadline" and v:
+                try:
+                    datetime.strptime(v, "%Y-%m-%d")
+                except ValueError:
+                    raise ValidationError("project deadline must be YYYY-MM-DD") from None
+            if k.startswith("quota_"):
+                v = max(0, min(10_000_000, v))
+            if k == "watch_providers":
+                bad = [x for x in v if x not in PROVIDERS]
+                if bad:
+                    raise ValidationError(f"unknown literature source: {', '.join(bad)}")
+            if k == "ai_provider" and v not in ("", "gemini", "groq", "openrouter", "ollama", "custom"):
+                raise ValidationError("unknown AI provider")
+            if k == "ai_base_url" and v and not re.match(r"^https?://[^\s/]+", v, re.I):
+                raise ValidationError("AI base URL must start with http:// or https://")
+            if k == "archive_rules":
+                for line in v:
+                    if "=>" not in line:
+                        raise ValidationError(f"archive rule needs 'keyword => stage key': {line}")
             clean[k] = v
         with self.db() as db:
             for k, v in clean.items():
@@ -365,6 +552,13 @@ class Store:
                 "tasks": rows("SELECT * FROM tasks ORDER BY stage_id, done, position, id"),
                 "rqs": rows("SELECT * FROM rqs ORDER BY position, id"),
                 "variables": rows("SELECT * FROM variables ORDER BY position, id"),
+                "relations": rows("SELECT * FROM relations ORDER BY position, id"),
+                "design": (rows("SELECT * FROM design WHERE key='main'") or [{}])[0],
+                "topic": (rows("SELECT * FROM topic WHERE key='main'") or [{}])[0],
+                "questions": rows("SELECT * FROM questions ORDER BY folder, position, id"),
+                "attempts": rows("SELECT id, question_id, score, coverage, seconds, created FROM attempts ORDER BY id DESC LIMIT 1000"),
+                "story": rows("SELECT * FROM story ORDER BY CASE key WHEN 'common' THEN 0 WHEN 'complication' THEN 1 "
+                              "WHEN 'concern' THEN 2 WHEN 'course' THEN 3 ELSE 4 END"),
                 "papers": rows("SELECT * FROM papers ORDER BY updated DESC, id DESC"),
                 "resources": rows("SELECT * FROM resources ORDER BY kind, position, id"),
                 "files": rows("SELECT * FROM files ORDER BY created DESC, id DESC"),
@@ -373,6 +567,7 @@ class Store:
                 "variable_papers": rows("SELECT * FROM variable_papers"),
                 "pending": db.execute("SELECT COUNT(*) FROM proposals WHERE status='pending'").fetchone()[0],
                 "activity": rows("SELECT * FROM activity ORDER BY id DESC LIMIT 60"),
+                "updates": rows("SELECT * FROM updates ORDER BY id DESC LIMIT 300"),
             }
         data["settings"] = self.settings(public=True)
         data["overall"] = overall_progress(data["stages"])
@@ -449,6 +644,10 @@ class Store:
                     raise ValidationError(f"op #{index + 1}: {e}") from None
                 except sqlite3.IntegrityError as e:
                     raise ValidationError(f"op #{index + 1}: {e}") from None
+            stages = {t[1] for t in touched if isinstance(t, tuple) and t[0] == "stage_tasks"}
+            manual = {t[1] for t in touched if isinstance(t, tuple) and t[0] == "manual_progress"}
+            if stages - manual and self._auto_progress(db, stages - manual, actor):
+                touched.add("stage")
         uploads = (self.root / "uploads").resolve()
         for item in touched:
             if isinstance(item, tuple) and item[0] == "unlink":
@@ -483,7 +682,7 @@ class Store:
         match = op.get("match")
         if isinstance(match, dict) and len(match) == 1:
             (field, value), = match.items()
-            if field not in spec["fields"] or spec["fields"][field][0] not in ("str",):
+            if field not in spec["fields"] or spec["fields"][field][0] not in ("str", "enum"):
                 raise ValidationError(f"cannot match {entity} by {field}")
             rows = db.execute(f"SELECT id FROM {spec['table']} WHERE {field}=?", (str(value),)).fetchall()
             if len(rows) != 1:
@@ -508,6 +707,8 @@ class Store:
         if entity not in ENTITIES:
             raise ValidationError(f"unknown entity {entity!r}")
         spec = ENTITIES[entity]
+        if spec.get("fixed") and kind in ("create", "delete"):
+            raise ValidationError(f"{entity} rows are fixed; only updates are allowed")
         if spec.get("internal") and not allow_internal and kind != "delete":
             raise ValidationError(f"{entity} records are managed by the upload endpoint")
         table = spec["table"]
@@ -532,11 +733,12 @@ class Store:
                 clean["position"] = (db.execute(f"SELECT COALESCE(MAX(position), -1) + 1 FROM {table}").fetchone()[0])
             if entity == "variable" and "role" not in clean:
                 clean["role"] = "iv"
+            if entity == "relation":
+                clean.setdefault("kind", "effect")
+                if clean["source_id"] == clean["target_id"]:
+                    raise ValidationError("a relation needs two different variables")
             if entity == "stage" and not clean.get("title_en"):
                 clean["title_en"] = clean["title_zh"]
-            if entity == "paper" and clean.get("paperread_id") and db.execute(
-                    "SELECT 1 FROM papers WHERE paperread_id=?", (clean["paperread_id"],)).fetchone():
-                raise ValidationError(f"PaperRead paper {clean['paperread_id']} is already in the library")
             cols = list(clean) + ["created", "updated"]
             db.execute(f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                        [*clean.values(), stamp, stamp])
@@ -544,6 +746,8 @@ class Store:
             if op.get("ref"):
                 refs[str(op["ref"])] = eid
             self._log(db, actor, "create", entity, eid, _label(entity, clean))
+            if entity == "task":
+                touched.add(("stage_tasks", clean["stage_id"]))
             touched.add(entity)
             return {"op": "create", "entity": entity, "id": eid}
         if kind == "update":
@@ -571,9 +775,16 @@ class Store:
             if entity == "stage" and "status" in clean:
                 if clean["status"] == "done" and "progress" not in clean:
                     clean["progress"] = 100
+            if entity == "task":
+                prev = db.execute("SELECT stage_id FROM tasks WHERE id=?", (eid,)).fetchone()
+                touched.add(("stage_tasks", prev["stage_id"]))
+            if entity == "stage" and "progress" in clean and "status" not in clean:
+                touched.add(("manual_progress", eid))
             sets = ", ".join(f"{k}=?" for k in clean)
             db.execute(f"UPDATE {table} SET {sets}, updated=? WHERE id=?", [*clean.values(), stamp, eid])
             row = dict(db.execute(f"SELECT * FROM {table} WHERE id=?", (eid,)).fetchone())
+            if entity == "task":
+                touched.add(("stage_tasks", row["stage_id"]))
             self._log(db, actor, "update", entity, eid, f"{_label(entity, row)}: {', '.join(clean)}")
             touched.add(entity)
             return {"op": "update", "entity": entity, "id": eid, "changed": list(clean)}
@@ -583,6 +794,8 @@ class Store:
             if entity == "stage" and db.execute("SELECT COUNT(*) FROM stages").fetchone()[0] <= 1:
                 raise ValidationError("the pipeline needs at least one stage")
             db.execute(f"DELETE FROM {table} WHERE id=?", (eid,))
+            if entity == "task":
+                touched.add(("stage_tasks", row["stage_id"]))
             if entity == "file":
                 # Remove the stored file only after the transaction commits (see apply_ops);
                 # dry runs and failed batches must never touch the disk.
@@ -633,6 +846,71 @@ class Store:
             self._log(db, actor, "link", name, a, pair + (f" ({extra['evidence']})" if extra.get("evidence") else ""))
         touched.add(name)
         return {"op": op["op"], "link": name, "a": a, "b": b}
+
+    def _auto_progress(self, db, stage_ids, actor) -> bool:
+        """With auto_progress_from_tasks on, a stage's progress follows its checklist:
+        done tasks / all tasks. A finished stage is left alone."""
+        row = db.execute("SELECT v FROM settings WHERE k='auto_progress_from_tasks'").fetchone()
+        if row is not None and not json.loads(row["v"]):
+            return False
+        changed = False
+        for sid in stage_ids:
+            stage = db.execute("SELECT * FROM stages WHERE id=?", (sid,)).fetchone()
+            if not stage or stage["status"] == "done":
+                continue
+            total, done = db.execute("SELECT COUNT(*), COALESCE(SUM(done), 0) FROM tasks WHERE stage_id=?", (sid,)).fetchone()
+            if not total:
+                continue
+            progress = round(done * 100 / total)
+            status = stage["status"]
+            if progress == 100 and status in ("todo", "active"):
+                status = "review"
+            elif 0 < progress < 100 and status in ("todo", "review"):
+                status = "active"
+            if progress != stage["progress"] or status != stage["status"]:
+                db.execute("UPDATE stages SET progress=?, status=?, updated=? WHERE id=?", (progress, status, now(), sid))
+                self._log(db, actor, "update", "stage", sid, f"{stage['title_zh']}: progress {stage['progress']}→{progress} (tasks {done}/{total})")
+                changed = True
+        return changed
+
+    # ------------------------------------------------------------------ daily usage (free API quotas)
+    @staticmethod
+    def today() -> str:
+        return date.today().isoformat()  # local calendar day: quotas reset at local midnight
+
+    def usage(self) -> dict:
+        settings = self.settings()
+        with self.db() as db:
+            rows = {r["provider"]: dict(r) for r in db.execute("SELECT * FROM usage WHERE day=?", (self.today(),))}
+        midnight = datetime.combine(date.today() + timedelta(days=1), datetime.min.time())
+        out = {"day": self.today(), "resets_at": midnight.isoformat(timespec="minutes"),
+               "resets_in_minutes": int((midnight - datetime.now()).total_seconds() // 60), "providers": {}}
+        for name in (*PROVIDERS, "ai"):
+            r = rows.get(name, {})
+            out["providers"][name] = {"requests": r.get("requests", 0), "tokens": r.get("tokens", 0),
+                                      "limit": settings.get(f"quota_{name}", 0),
+                                      "token_limit": settings.get("quota_ai_tokens", 0) if name == "ai" else None}
+        return out
+
+    def take_quota(self, provider: str) -> None:
+        """Count one request against today's quota, or refuse when it is used up."""
+        settings = self.settings()
+        limit = int(settings.get(f"quota_{provider}", 0) or 0)
+        with self.db() as db:
+            r = db.execute("SELECT requests, tokens FROM usage WHERE day=? AND provider=?", (self.today(), provider)).fetchone()
+            used, tokens = (r["requests"], r["tokens"]) if r else (0, 0)
+            if limit and used >= limit:
+                raise QuotaError(provider, limit)
+            if provider == "ai" and settings.get("quota_ai_tokens") and tokens >= int(settings["quota_ai_tokens"]):
+                raise QuotaError("ai-tokens", int(settings["quota_ai_tokens"]))
+            db.execute("INSERT INTO usage (day, provider, requests) VALUES (?, ?, 1)"
+                       " ON CONFLICT(day, provider) DO UPDATE SET requests=requests+1", (self.today(), provider))
+        self.emit({"type": "changed", "entity": "usage"})
+
+    def add_tokens(self, provider: str, tokens: int) -> None:
+        with self.db() as db:
+            db.execute("INSERT INTO usage (day, provider, tokens) VALUES (?, ?, ?)"
+                       " ON CONFLICT(day, provider) DO UPDATE SET tokens=tokens+excluded.tokens", (self.today(), provider, int(tokens)))
 
     def _log(self, db, actor, action, entity, eid, summary) -> None:
         db.execute("INSERT INTO activity (at, actor, action, entity, entity_id, summary) VALUES (?,?,?,?,?,?)",

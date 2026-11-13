@@ -133,6 +133,8 @@
     ["name_zh", "str"], ["name_en", "str"],
     ["definition", "text", { wide: true }],
     ["measurement", "text", { wide: true }],
+    ["measure_source", "select", { label: "dz_source", options: [["", "—"], ...["self", "supervisor", "peer", "objective", "manipulated", "other"].map((x) => [x, t("src_" + x)])] }],
+    ["wave", "select", { label: "dz_wave", options: [["0", "—"], ...[1, 2, 3, 4, 5, 6].map((n) => [String(n), "T" + n])] }],
     ["notes", "text", { wide: true }],
   ], v ? null : { role: role || "iv", symbol: nextSymbol(role || "iv") }, v ? `${t("edit")} · ${v.symbol}` : t("add_variable"));
 
@@ -145,8 +147,10 @@
     ["doi", "str"], ["url", "str"],
     ["local_path", "str", { wide: true, ph: "/Users/me/Papers/davis1989.pdf" }],
     ["tags", "str"], ["citekey", "str"],
+    ["folder", "str", { label: "paper_folder", ph: H.lang === "en" ? "e.g. Week 5 / Methods" : "例如 研究方法／第 5 週" }],
     ["abstract", "text", { wide: true, rows: 4 }],
     ["notes", "text", { wide: true, rows: 4 }],
+    ...H.paperFiveCFields(),
   ], p ? null : { status: "to_read", source: "manual", ...(defaults || {}) }, p ? t("edit") : t("add_paper"));
 
   /* ================= chips ================= */
@@ -215,7 +219,7 @@
   }
 
   /* ================= Literature ================= */
-  let searchResults = null, searchBusy = false, searchQuery = "", searchYear = "";
+  let searchResults = null, searchBusy = false, searchQuery = "", searchYear = "", searchProvider = "openalex";
   function openalexPanel() {
     const q = H.input(searchQuery, { placeholder: t("search_ph"), "aria-label": t("search_ph"), type: "search" });
     const y = H.input(searchYear, { type: "number", placeholder: t("year_from"), "aria-label": t("year_from"), class: "year", min: 1900, max: 2100 });
@@ -224,7 +228,7 @@
       searchQuery = q.value.trim(); searchYear = y.value;
       if (!searchQuery) return;
       searchBusy = true; H.render.core();
-      try { searchResults = (await H.api(`/api/search/openalex?q=${encodeURIComponent(searchQuery)}&year_from=${encodeURIComponent(searchYear || "")}`)).results; }
+      try { searchResults = (await H.api(`/api/search?provider=${searchProvider}&q=${encodeURIComponent(searchQuery)}&year_from=${encodeURIComponent(searchYear || "")}`)).results; H.loadUsage && H.loadUsage(); }
       catch (err) { searchResults = null; H.toast(err.message, "error"); }
       searchBusy = false; H.render.core();
       document.querySelector(".oa-form input")?.focus();
@@ -233,6 +237,8 @@
     const knownOa = new Set(H.state.papers.map((p) => p.openalex_id).filter(Boolean));
     return el("div.oa", null,
       el("form.oa-form", { onsubmit: go }, H.icon("search", 16), q, y,
+        H.select(searchProvider, [["openalex", "OpenAlex"], ["wiley", "Wiley"], ["semantic", "Semantic Scholar"],
+          ...(H.state.settings.wos_api_key_set ? [["wos", "Web of Science"]] : [])], { class: "sm prov-sel", "aria-label": t("source"), onchange: (e) => { searchProvider = e.target.value; } }),
         H.btn(searchBusy ? t("searching") : t("search"), { type: "submit", variant: "primary", small: true, disabled: searchBusy })),
       searchResults ? el("ul.oa-results", null, searchResults.length ? searchResults.map((r) => {
         const have = (r.doi && known.has(r.doi.toLowerCase())) || (r.openalex_id && knownOa.has(r.openalex_id));
@@ -242,7 +248,7 @@
               r.cited_by ? el("span.mono.muted", null, " · " + t("cited_by", { n: r.cited_by })) : null)),
           H.btn(have ? t("added") : t("add_to_library"), { icon: have ? "check" : "plus", small: true, variant: have ? "ghost" : "outline", disabled: have,
             onclick: () => H.ops([{ op: "create", entity: "paper", data: { title: r.title, authors: r.authors, year: r.year, venue: r.venue, doi: r.doi, url: r.url,
-              abstract: r.abstract, openalex_id: r.openalex_id, source: "openalex", status: "candidate" } }]) }));
+              abstract: r.abstract, openalex_id: r.openalex_id || "", source: r.provider || "openalex", status: "candidate" } }]) }));
       }) : el("li.empty.sm", null, t("no_results")))
         : null);
   }
@@ -270,16 +276,18 @@
         (!q || [p.title, p.authors, p.tags, p.venue, p.notes, String(p.year)].join(" ").toLowerCase().includes(q)));
       if (!papers.length) { H.put(table, el("div.empty-state", null, H.icon("book", 22), el("p", null, t("lit_empty")))); return; }
       if (!rows.length) { H.put(table, el("p.empty", null, t("no_results"))); return; }
-      H.put(table, el("ul.papers", null, rows.map((p) => paperRow(p, scope))));
+      H.put(table, H.ui.litView === "5c" ? H.fiveCCompare(rows) : el("ul.papers", null, rows.map((p) => paperRow(p, scope))));
     };
     drawTable();
     return el("div", null,
       el("div.toolbar.wrap", null, filter, statusChips,
+        el("div.seg.small", { role: "radiogroup", "aria-label": t("st_view") }, [["list", t("st_view_list")], ["5c", t("st_view_5c")]].map(([v, l]) =>
+          el("button.seg-btn", { type: "button", role: "radio", "aria-checked": String((H.ui.litView || "list") === v), onclick: () => { H.ui.litView = v; H.render.core(); H.render.pipeline(); } }, l))),
         el("div.tool-group", null,
           H.btn(t("import_bib"), { icon: "upload", variant: "ghost", small: true, onclick: () => bibInput.click() }), bibInput,
           H.btn(t("export_bib"), { icon: "download", variant: "ghost", small: true, onclick: () => exportBib() }),
           H.btn(t("add_paper"), { icon: "plus", variant: "primary", small: true, onclick: () => H.editPaper(null) }))),
-      el("details.oa-wrap", { open: !!searchResults || searchBusy || null }, el("summary", null, H.icon("search", 15), t("search_openalex"), el("span.mono.muted", null, "api.openalex.org")), openalexPanel()),
+      el("details.oa-wrap", { open: !!searchResults || searchBusy || null }, el("summary", null, H.icon("search", 15), t("search_openalex"), el("span.mono.muted", null, "OpenAlex · Wiley · Semantic Scholar · WoS")), openalexPanel()),
       table);
   }
 
@@ -298,11 +306,11 @@
     const vlinks = H.links("variable_paper", "b", p.id);
     const status = H.select(p.status, H.PAPER_STATUS.map((s) => [s, t("ps_" + s)]), { class: "sm status-sel ps-" + p.status, "aria-label": t("status"), dataset: { fkey: `paper-st-${p.id}-${scope}` },
       onchange: (e) => H.ops([{ op: "update", entity: "paper", id: p.id, data: { status: e.target.value } }]) });
-    const prUrl = (H.safeUrl(H.state.settings.paperread_url) || "").replace(/\/$/, "");
     return el("li.paper" + (p.status === "excluded" ? ".excluded" : ""), null,
       el("div.paper-main", null,
         el("button.paper-title", { type: "button", onclick: () => H.editPaper(p) }, p.title),
-        el("div.meta", null, [shortAuthors(p.authors), p.year || null, p.venue].filter(Boolean).join(" · "),
+        el("div.meta", null, [shortAuthors(p.authors), p.year || null, p.venue].filter(Boolean).join(" · "), H.fiveCDots(p),
+          p.story_role ? el("span.pill.tiny", { title: t("st_role") }, (H.FIVE_C.find((c) => c.key === p.story_role) || {}).mark + " " + t("c5_" + p.story_role + "_short")) : null,
           p.rating ? el("span.stars", { "aria-label": p.rating + "/5" }, "★".repeat(p.rating)) : null,
           p.source && p.source !== "manual" ? el("span.src.mono", null, p.source.split(":")[0]) : null),
         el("div.chips", null, vlinks.map((l) => { const v = H.by(H.state.variables, l.variable_id); return v ? varChip(v, l.evidence) : null; }),
@@ -310,7 +318,6 @@
       el("div.paper-side", null, status,
         el("div.icon-row", null,
           p.local_path ? H.btn(t("open_pdf"), { icon: "file", iconOnly: true, small: true, variant: "ghost", onclick: () => H.openLocal(p.local_path) }) : null,
-          p.paperread_id && prUrl ? el("a.btn.ghost.icon-only.sm", { href: `${prUrl}/read/${encodeURIComponent(p.paperread_id)}`, target: "_blank", rel: "noopener", title: t("open_in_pr"), "aria-label": t("open_in_pr") }, H.icon("book", 16)) : null,
           (() => { const href = p.doi ? `https://doi.org/${encodeURI(p.doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, ""))}` : H.safeUrl(p.url);
             return href ? el("a.btn.ghost.icon-only.sm", { href, target: "_blank", rel: "noopener noreferrer", title: p.doi || p.url, "aria-label": p.doi ? "DOI" : "URL" }, H.icon("external", 16)) : null; })(),
           H.btn(t("edit"), { icon: "edit", iconOnly: true, small: true, variant: "ghost", onclick: () => H.editPaper(p) }))));
@@ -347,12 +354,12 @@
   }
 
   /* ================= Model (SVG) ================= */
-  function modelView() {
+  /* Role-based sketch used until explicit hypothesis paths exist. */
+  function roleModelSvg() {
     const vars = H.state.variables;
     const by = (r) => vars.filter((v) => v.role === r);
     const X = by("iv"), Y = by("dv"), M = by("med"), Z = by("mod"), C = by("ctrl");
-    if (!X.length || !Y.length) return el("div.empty-state", null, H.icon("layers", 22), el("p", null, t("model_empty")),
-      H.btn(t("add_variable"), { icon: "plus", variant: "primary", onclick: () => H.editVariable(null, X.length ? "dv" : "iv") }));
+    if (!X.length || !Y.length) return null;
     const ns = "http://www.w3.org/2000/svg";
     const mk = (tag, attrs, text) => { const n = document.createElementNS(ns, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); if (text != null) n.textContent = text; return n; };
     const W = 960, boxW = 200, boxH = 56, gap = 18;
@@ -422,14 +429,37 @@
       nodes.append(g);
     }
     svg.append(nodes);
-    return el("div", null, el("p.hint-line", null, t("model_hint")), el("div.model-wrap", null, svg),
-      el("div.legend", null, ["iv", "med", "mod", "dv", "ctrl"].map((r) => el("span.legend-item", null, el("i.sw.role-" + r), roleLabel(r)))));
+    return svg;
+  }
+
+  function modelView() {
+    const rels = H.state.relations || [];
+    const svg = rels.length ? H.pathModelSvg(H.state.variables, rels, { interactive: true }) : roleModelSvg();
+    const tools = el("div.toolbar.wrap", null,
+      el("p.hint-line.grow", null, rels.length ? t("model_hint_paths") : t("model_hint")),
+      el("div.tool-group", null,
+        H.btn(t("fw_from_text"), { icon: "sparkle", variant: "primary", small: true, onclick: () => H.openFramework() }),
+        H.btn(t("pm_button"), { icon: "grid", variant: "outline", small: true, onclick: () => H.openProcessModels() }),
+        H.btn(t("fw_add_rel"), { icon: "plus", variant: "ghost", small: true, disabled: H.state.variables.length < 2, onclick: () => H.editRelation(null) }),
+        // the download is a clean figure for the thesis: no paper-count badges or RQ markers
+        svg ? H.btn(t("fw_download"), { icon: "download", variant: "ghost", small: true, onclick: () =>
+          H.downloadSvg(rels.length ? H.pathModelSvg(H.state.variables, rels, { idSuffix: "-dl" }) : svg, "research-model.svg") }) : null));
+    if (!svg) return el("div", null, tools, el("div.empty-state", null, H.icon("layers", 22), el("p", null, t("model_empty_text")),
+      el("div.toolbar", null, H.btn(t("fw_from_text"), { icon: "sparkle", variant: "primary", onclick: () => H.openFramework() }),
+        H.btn(t("pm_button"), { icon: "grid", variant: "outline", onclick: () => H.openProcessModels() }),
+        H.btn(t("add_variable"), { icon: "plus", variant: "ghost", onclick: () => H.editVariable(null, "iv") }))));
+    return el("div", null, tools, el("div.model-wrap", null, svg),
+      el("div.legend", null, ["iv", "med", "mod", "dv", "ctrl"].map((r) => el("span.legend-item", null, el("i.sw.role-" + r), roleLabel(r))),
+        rels.length ? [el("span.legend-item", null, el("i.ln.pos"), t("fw_sign_pos")), el("span.legend-item", null, el("i.ln.neg"), t("fw_sign_neg")),
+          el("span.legend-item", null, el("i.ln.modl"), t("fw_kind_moderates"))] : null),
+      rels.length ? H.relationList() : null);
   }
 
   /* ================= section + modules ================= */
-  const TABS = [["rq", "tab_rq", rqView], ["variables", "tab_vars", variablesView], ["literature", "tab_lit", literatureView],
-    ["matrix", "tab_matrix", matrixView], ["model", "tab_model", modelView]];
+  const TABS = [["story", "tab_story", () => H.storyView()], ["rq", "tab_rq", rqView], ["variables", "tab_vars", variablesView], ["literature", "tab_lit", literatureView],
+    ["matrix", "tab_matrix", matrixView], ["model", "tab_model", modelView], ["design", "tab_design", () => H.designView()]];
 
+  H.CORE_TABS = TABS.map(([id, label]) => [id, label]);
   H.render = H.render || {};
   H.render.core = function () {
     const root = document.getElementById("core");
@@ -459,6 +489,7 @@
     if (module === "code") return H.codeCard ? H.codeCard() : null;
     if (module === "writing") return el("div.card", null, el("p", null, t("writing_hint")),
       el("div.toolbar", null, H.btn(t("export_bib"), { icon: "download", variant: "primary", onclick: exportBib }),
+        H.btn(t("sl_hero"), { icon: "layers", variant: "outline", onclick: () => H.openSlides() }),
         el("span.mono.muted", null, `${H.state.papers.filter((p) => p.status !== "excluded").length} ${t("papers")}`)));
     return null;
   };

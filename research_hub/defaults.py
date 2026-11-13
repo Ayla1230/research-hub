@@ -88,15 +88,11 @@ DEFAULT_RESOURCES = [
     {"kind": "database", "name": "Web of Science", "target": "https://www.webofscience.com/wos/woscc/basic-search"},
     {"kind": "database", "name": "華藝線上圖書館 Airiti Library", "target": "https://www.airitilibrary.com/"},
     {"kind": "database", "name": "臺灣博碩士論文知識加值系統 NDLTD", "target": "https://ndltd.ncl.edu.tw/"},
-    {"kind": "paperread", "name": "PaperRead", "target": "http://127.0.0.1:8765",
-     "notes": "PaperRead reader — open papers, translations and annotations."},
 ]
 
 DEFAULT_SETTINGS = {
     "project_title": "我的研究 · My Research",
     "language": "zh",
-    "paperread_url": "http://127.0.0.1:8765",
-    "paperread_library": "~/PaperRead/library",
     "reference_folders": [],
     "code_dir": "",
     "allow_code_run": False,
@@ -104,4 +100,48 @@ DEFAULT_SETTINGS = {
     "watch_folders": True,
     "openalex_mailto": "",
     "agent_token": "",
+    # --- progress tracking
+    "project_deadline": "",          # final completion goal for the whole thesis (YYYY-MM-DD)
+    "project_goal": "",              # what "finished" means, in the user's words
+    "auto_progress_from_tasks": True,
+    "archive_rules": [],             # extra "keyword => stage_key" lines, checked before the built-in ones
+    # --- literature tracking (free APIs, daily quotas reset at local midnight)
+    "watch_providers": ["openalex", "wiley", "semantic"],
+    "quota_openalex": 1000,
+    "quota_wiley": 1000,
+    "quota_semantic": 300,
+    "quota_wos": 50,
+    "wos_api_key": "",               # secret: Clarivate Web of Science Starter API key
+    # --- optional AI assistant (OpenAI-compatible endpoint, free tier)
+    "ai_provider": "",               # "", "gemini", "groq", "openrouter", "ollama", "custom"
+    "ai_base_url": "",
+    "ai_model": "",
+    "ai_api_key": "",                # secret
+    "quota_ai": 100,                 # requests per day
+    "quota_ai_tokens": 200000,       # tokens per day
+}
+
+SECRET_SETTINGS = ("agent_token", "ai_api_key", "wos_api_key")
+
+# Free-tier presets for the optional AI assistant (all speak the OpenAI chat API).
+AI_PRESETS = {
+    "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "model": "gemini-2.5-flash"},
+    "groq": {"base_url": "https://api.groq.com/openai/v1", "model": "llama-3.3-70b-versatile"},
+    "openrouter": {"base_url": "https://openrouter.ai/api/v1", "model": "meta-llama/llama-3.3-70b-instruct:free"},
+    "ollama": {"base_url": "http://127.0.0.1:11434/v1", "model": "qwen2.5:7b"},
+}
+
+# Auto-archive: words in a file's name or folder that point to a pipeline stage.
+# Matched case-insensitively against the full relative path, including the extension.
+STAGE_KEYWORDS = {
+    "topic": ["proposal", "motivation", "background", "topic", "計畫書", "動機", "背景", "題目"],
+    "literature": ["literature", "review", "lit_", "lit-", "reference", "references", "文獻", "探討", ".bib", ".ris", "zotero"],
+    "rq": ["research question", "rq", "hypothes", "假設", "研究問題"],
+    "framework": ["framework", "conceptual", "model", "variable", "架構", "變數", "模型"],
+    "method": ["method", "design", "instrument", "questionnaire design", "sampling", "方法", "設計", "抽樣", "量表"],
+    "data": ["survey", "questionnaire", "irb", "consent", "pilot", "raw", "dataset", "問卷", "倫理", "前測", "施測", "原始資料"],
+    "analysis": ["analysis", "analys", "stats", "spss", "sem", "regression", ".py", ".ipynb", ".r", ".csv", ".xlsx", ".sav", "分析", "統計"],
+    "results": ["result", "finding", "discussion", "結果", "討論"],
+    "writing": ["draft", "chapter", "thesis", "manuscript", "dissertation", ".tex", ".docx", "初稿", "論文", "章"],
+    "defense": ["defense", "defence", "slides", ".pptx", ".key", "submission", "revision", "口試", "簡報", "投稿", "修訂"],
 }
