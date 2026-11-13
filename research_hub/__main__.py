@@ -50,7 +50,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.demo:
             from .demo import apply as demo
             print("Demo data added." if demo(store) else "Workspace is not empty; demo data skipped.")
-        run(store, args.host, args.port, open_browser=not args.no_browser, watch=not args.no_watch)
+        try:
+            run(store, args.host, args.port, open_browser=not args.no_browser, watch=not args.no_watch)
+        except OSError as e:
+            print(f"Could not start on port {args.port}: {e}\nResearch Hub may already be running - open http://127.0.0.1:{args.port}/ "
+                  f"or start with --port {args.port + 1}", file=sys.stderr)
+            return 1
         return 0
     if args.cmd == "mcp":
         if not args.token:

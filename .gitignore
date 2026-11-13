@@ -8,3 +8,4 @@ dist/
 # archify delivery receipts (contain local absolute paths)
 research_hub/web/diagrams/*.json
 .archify/**/review-*/
+*.log
