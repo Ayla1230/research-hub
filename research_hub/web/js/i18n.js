@@ -295,6 +295,7 @@
     dz_fit_long: ["縱貫／面板資料", "Longitudinal / panel data"], dz_fit_long_lim: ["注意時間順序與單位差異", "Mind temporal order and unit differences"],
     dz_fit_exp: ["適切的實驗設計", "An appropriate experiment"], dz_fit_exp_lim: ["檢查操弄、樣本與情境契合度", "Check manipulation, sample and context fit"],
     dz_fit_note: ["最重要的不是方法有多進階，而是方法能否回答研究問題。", "What matters is not how advanced the method is, but whether it answers the research question."],
+    s_auto_analyze: ["上傳文件後自動分析：辨識題目、變數與假設路徑，送到「待確認更新」", "Analyse uploaded documents: propose the title, variables and paths they imply"],
     pm_button: ["PROCESS 模型範本", "PROCESS templates"],
     nav_home: ["總覽與研究流程", "Overview & pipeline"], exam: ["考題與申論", "Exam practice"], exam_hint: ["上傳論文自動出題、考題整理與預測、申論模擬練習", "Questions from uploaded papers, question bank and prediction, timed essay practice"], paper_folder: ["資料夾（文獻整理）", "Folder"], word_hero: ["匯出 Word", "Export Word"], voice_hero: ["語音 Podcast", "Podcast"],
     unlinked: ["未連結", "Not linked"], view_all: ["查看全部", "View all"],

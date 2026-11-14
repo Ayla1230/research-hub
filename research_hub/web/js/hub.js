@@ -248,6 +248,17 @@
       return { kind: op.op, text: `${name(ae, op.a)}  ↔  ${name(be, op.b)}`, detail: op.data && op.data.evidence ? t("ev_" + op.data.evidence) : "" };
     }
     const target = op.match ? Object.values(op.match)[0] : op.id;
+    if (op.op === "create" && op.entity === "relation") {
+      // a path reads as "H1 轉換型領導 → 員工創新行為", not as raw ids
+      const d = op.data || {};
+      const short = (id) => name("variable", id).replace(/^＋ /, "");
+      let text = `${short(d.source_id)} → ${short(d.target_id)}`;
+      if (d.kind === "moderates") {
+        const base = typeof d.moderates_id === "string" ? ((all || []).find((o) => "$" + o.ref === d.moderates_id) || {}).data : H.by(s.relations || [], d.moderates_id);
+        text = `${short(d.source_id)} ${t("fw_moderates_word")} ${base ? `${short(base.source_id)} → ${short(base.target_id)}` : short(d.target_id)}`;
+      }
+      return { kind: "create", text: `${ENTITY("relation")}: ${d.label ? d.label + " " : ""}${text}`, detail: d.sign ? `${FIELD("sign")}: ${d.sign}` : "" };
+    }
     if (op.op === "create") {
       const d = op.data || {};
       return { kind: "create", text: `${ENTITY(op.entity)}: ${d.title || d.title_zh || (d.symbol ? d.symbol + " " + (d.name_zh || d.name_en || "") : "") || d.name || d.text || ""}`,
@@ -388,6 +399,7 @@
       project_deadline: el("input.inp", { type: "date", value: s.project_deadline || "" }),
       project_goal: H.textarea(s.project_goal, { rows: 2, placeholder: t("ci_goal_ph") }),
       auto_progress_from_tasks: el("input", { type: "checkbox", checked: !!s.auto_progress_from_tasks }),
+      auto_analyze_uploads: el("input", { type: "checkbox", checked: s.auto_analyze_uploads !== false }),
       archive_rules: H.textarea((s.archive_rules || []).join("\n"), { rows: 3, placeholder: "survey => data\nchapter2 => literature" }),
       quota_openalex: H.input(s.quota_openalex, { type: "number", min: 0 }), quota_wiley: H.input(s.quota_wiley, { type: "number", min: 0 }),
       quota_semantic: H.input(s.quota_semantic, { type: "number", min: 0 }), quota_wos: H.input(s.quota_wos, { type: "number", min: 0 }),
@@ -417,6 +429,7 @@
       el("div.form-grid", null, H.field(t("ci_deadline"), f.project_deadline), el("div"),
         el("div.span2", null, H.field(t("s_project_goal"), f.project_goal)),
         el("div.span2", null, toggle(f.auto_progress_from_tasks, t("s_auto_progress"))),
+        el("div.span2", null, toggle(f.auto_analyze_uploads, t("s_auto_analyze"))),
         el("div.span2", null, H.field(t("s_archive_rules"), f.archive_rules, t("s_archive_hint")))),
       el("h3.mini", null, t("s_sources")),
       el("p.hint", null, t("s_sources_hint")), providerToggles,

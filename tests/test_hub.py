@@ -779,6 +779,23 @@ class ServerTests(unittest.TestCase):
         self.assertEqual((code, got["source"], got["questions"][0]["folder"]), (200, "論文.txt", "週次5"))
         self.assertEqual(self.req("/api/exam/from-file", raw=b"too short", headers={"X-Filename": "a.txt"})[0], 400)
         self.assertEqual(self.req("/api/tts", {"text": ""})[0], 400)
+
+    def test_upload_is_analysed_into_a_proposal(self):
+        import time
+        doc = "組織承諾對工作績效之影響：以工作滿意度為中介變數\n\n摘要\n本研究以問卷調查法進行。".encode()
+        code, body = self.req("/api/upload", raw=doc, headers={"X-Filename": quote("計畫書.txt")})
+        self.assertEqual((code, json.loads(body)["analyzing"]), (200, True))
+        for _ in range(40):
+            code, body = self.req("/api/proposals")
+            mine = [p for p in json.loads(body)["items"] if p["source"] == "upload"]
+            if mine:
+                break
+            time.sleep(0.1)
+        self.assertTrue(mine)
+        self.assertIn("3 個變數、3 條路徑", mine[0]["title"])
+        self.assertEqual(self.store.snapshot()["relations"], [])  # nothing applied before approval
+        code, body = self.req("/api/analyze-file", {"id": json.loads(self.req("/api/state")[1])["files"][0]["id"]})
+        self.assertEqual(code, 200)
         self.assertIn("voices", json.loads(self.req("/api/tts/voices")[1]))
 
 
@@ -909,6 +926,35 @@ class TopicThesisTests(unittest.TestCase):
             store.apply_ops([{"op": "create", "entity": "attempt", "data": {"question_id": 9999, "score": 10}}])
         store.apply_ops([{"op": "delete", "entity": "question", "id": q["id"]}])
         self.assertEqual(store.snapshot()["attempts"], [])
+
+    def test_model_from_title_without_hypotheses(self):
+        f = integ.infer_framework("轉換型領導對員工創新行為之影響：以心理安全感為中介變數\n\n第一章 緒論\n近年來企業重視創新。")
+        self.assertEqual(f["method"], "title")
+        self.assertEqual({v["role"]: v["name_zh"] for v in f["variables"]}, {"iv": "轉換型領導", "med": "心理安全感", "dv": "員工創新行為"})
+        self.assertEqual(len(f["relations"]), 3)
+        f = integ.infer_framework("信任對知覺有用性與使用意圖關係之調節效果：以台灣網路購物為例")
+        self.assertEqual([(v["role"], v["name_zh"]) for v in f["variables"]], [("iv", "知覺有用性"), ("mod", "信任"), ("dv", "使用意圖")])
+        self.assertEqual([r["kind"] for r in f["relations"]], ["effect", "moderates"])
+        f = integ.infer_framework("工作壓力、情緒勞務對離職傾向的影響—以組織支持為調節變數")
+        self.assertEqual(sum(v["role"] == "iv" for v in f["variables"]), 2)
+        f = integ.infer_framework("The effect of job stress on turnover intention: The mediating role of burnout")
+        self.assertEqual([v["name_en"] for v in f["variables"]], ["job stress", "burnout", "turnover intention"])
+        # numbered hypotheses win over the title; plain text without a model gives nothing
+        f = integ.infer_framework("A 對 B 之影響\nH1: 知覺有用性正向影響使用意圖。")
+        self.assertEqual(f["method"], "rules")
+        self.assertIn("H1", [r["label"] for r in f["relations"]])
+        self.assertEqual(integ.infer_framework("今天開會討論了預算與時程。")["method"], "none")
+
+    def test_framework_ops_reuse_existing(self):
+        store = Store(Path(tempfile.mkdtemp()))
+        store.apply_ops([{"op": "create", "entity": "variable", "data": {"symbol": "X1", "role": "iv", "name_zh": "轉換型領導"}}])
+        found = integ.infer_framework("轉換型領導對員工創新行為之影響：以心理安全感為中介變數")
+        ops, counts = integ.framework_ops(found, store.snapshot())
+        self.assertEqual(counts, {"variables": 2, "relations": 3})
+        store.apply_ops(ops)
+        snap = store.snapshot()
+        self.assertEqual(sorted(v["symbol"] for v in snap["variables"]), ["M1", "X1", "Y1"])
+        self.assertEqual(integ.framework_ops(found, snap), ([], {"variables": 0, "relations": 0}))  # nothing new the second time
 
     def test_voice_rejects_empty_and_unknown(self):
         with self.assertRaises(voice.VoiceError):

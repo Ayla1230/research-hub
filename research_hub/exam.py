@@ -186,7 +186,9 @@ def paper_facts(text: str, filename: str = "") -> dict:
     title = stem
     if first is not None:
         title = head[first]
-        if first + 1 < len(head) and titleish(head[first + 1]) and not head[first].endswith((".", "。")) and len(title) < 90:
+        nxt = head[first + 1] if first + 1 < len(head) else ""
+        label = re.search(r"[:：]|教授|研究生|作者|advisor|author|student|university|大學|學系|研究所", nxt, re.I)
+        if nxt and titleish(nxt) and not label and not re.search(r"[:：]", title) and not head[first].endswith((".", "。")) and len(title) < 90:
             title += ("" if topic_mod.has_cjk(title) else " ") + head[first + 1]  # titles often wrap onto a second line
     hits = sorted(((len(re.findall(pattern, text, re.I)), zh, en) for pattern, zh, en in METHODS), reverse=True)
     methods = [(zh, en) for n, zh, en in hits if n >= (3 if len(text) > 5000 else 1)][:2]

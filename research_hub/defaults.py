@@ -104,6 +104,7 @@ DEFAULT_SETTINGS = {
     "project_deadline": "",          # final completion goal for the whole thesis (YYYY-MM-DD)
     "project_goal": "",              # what "finished" means, in the user's words
     "auto_progress_from_tasks": True,
+    "auto_analyze_uploads": True,    # read uploaded documents and propose the title, variables and paths they imply
     "archive_rules": [],             # extra "keyword => stage_key" lines, checked before the built-in ones
     # --- literature tracking (free APIs, daily quotas reset at local midnight)
     "watch_providers": ["openalex", "wiley", "semantic"],

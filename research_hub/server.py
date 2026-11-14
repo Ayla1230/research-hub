@@ -31,6 +31,7 @@ from .store import ENTITIES, QuotaError, Store, ValidationError
 
 WEB = Path(__file__).with_name("web")
 MAX_UPLOAD = 300 * 1024 * 1024
+ANALYZABLE = {".docx", ".pdf", ".txt", ".md", ".tex"}
 MAX_JSON = 20 * 1024 * 1024
 LOOPBACK = {"localhost", "127.0.0.1", "::1"}
 mimetypes.add_type("text/javascript", ".js")
@@ -60,6 +61,48 @@ class App:
                     pass
 
     # -------------------------------------------------------------- folder watcher
+    def analyze_upload(self, path: Path, raise_errors: bool = False) -> dict | None:
+        """Read an uploaded document and queue what it implies for the rest of the workspace (thesis title,
+        variables, hypothesised paths) as ONE proposal in the inbox. Nothing changes until the user approves."""
+        try:
+            text = integ.read_document(path.read_bytes(), path.name).strip()
+        except (ValueError, OSError) as e:
+            if raise_errors:
+                raise ValidationError(str(e)) from None
+            return None
+        if len(text) < 20:
+            if raise_errors:
+                raise ValidationError("the file has too little text to analyse")
+            return None
+        from . import exam
+        snap = self.store.snapshot()
+        facts = exam.paper_facts(text, path.name)
+        found = integ.infer_framework(text, facts["title"])
+        ops, counts = integ.framework_ops(found, snap)
+        topic = snap.get("topic") or {}
+        set_title = bool(facts["title"]) and not (topic.get("title") or "").strip() and found["method"] != "none"
+        if set_title:
+            ops.append({"op": "update", "entity": "topic", "match": {"key": "main"}, "data": {"title": facts["title"][:200]}})
+        if not ops:
+            return {"proposal": None, "method": found["method"], **counts}
+        zh = self.store.settings().get("language") != "en"
+        sentences = "；".join(found.get("sentences", [])[:3])[:600]
+        if zh:
+            how = {"rules": "文中的假設句", "title": "題目或研究目的"}.get(found["method"], found["method"])
+            summary = f"從「{path.name}」的{how}辨識：{sentences}。確認後會畫成研究架構圖，簡報與 Word 匯出會直接使用。"
+            title = f"{path.name}：{counts['variables']} 個變數、{counts['relations']} 條路徑" + ("、論文題目" if set_title else "")
+        else:
+            how = {"rules": "written hypotheses", "title": "the title or purpose statement"}.get(found["method"], found["method"])
+            summary = f"Read from {path.name} ({how}): {sentences}. Approve to draw the research model; the slides and the Word export then use it."
+            title = f"{path.name}: {counts['variables']} variables, {counts['relations']} paths" + (", thesis title" if set_title else "")
+        try:
+            out = self.store.propose("upload", title, ops, summary)
+        except ValidationError:
+            if raise_errors:
+                raise
+            return None
+        return {"proposal": out["id"], "method": found["method"], **counts}
+
     def add_export(self, data: bytes, name: str) -> str:
         """Keep a file the page generated (e.g. a .pptx) for one download, so the browser
         receives it with a proper UTF-8 filename. Old entries expire after 10 minutes."""
@@ -525,7 +568,17 @@ def make_handler(app: App):
                 res = store.apply_ops([{"op": "create", "entity": "file", "data": {
                     "name": target.name, "stored": rel, "size": length, "stage_id": stage_id, "paper_id": paper_id,
                     "mime": mimetypes.guess_type(target.name)[0] or ""}}], actor="user", allow_internal=True)
-                return self._json(200, {"id": res[0]["id"], "name": target.name})
+                if store.settings().get("auto_analyze_uploads", True) and target.suffix.lower() in ANALYZABLE and length <= 40 * 1024 * 1024:
+                    threading.Thread(target=app.analyze_upload, args=(target,), daemon=True).start()
+                return self._json(200, {"id": res[0]["id"], "name": target.name, "analyzing": target.suffix.lower() in ANALYZABLE})
+            if path == "/api/analyze-file":
+                row = store.get("file", int(self._payload().get("id") or 0))
+                if not row:
+                    raise ValidationError("unknown file")
+                target = (store.root / "uploads" / row["stored"]).resolve()
+                if not integ.inside(target, [store.root / "uploads"]) or not target.is_file():
+                    raise ValidationError("file is missing")
+                return self._json(200, app.analyze_upload(target, raise_errors=True) or {"proposal": None})
             if path == "/api/exports":
                 name = unquote(self.headers.get("X-Filename", "")).strip()
                 name = re.sub(r"[\\/:*?\"<>|\x00-\x1f]", "_", Path(name).name)[:180] or "export.bin"
@@ -753,7 +806,7 @@ def make_handler(app: App):
                 result = integ.normalize_framework(integ.parse_json_block(reply), "ai")
                 result["tokens"] = tokens
             else:
-                result = integ.extract_framework_rules(text)
+                result = integ.infer_framework(text)
             existing = {}
             for v in store.snapshot()["variables"]:
                 for name in (v["name_zh"], v["name_en"]):

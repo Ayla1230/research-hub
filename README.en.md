@@ -99,6 +99,8 @@ Export Word builds a .docx draft: cover, acknowledgements, abstract, contents an
 
 ## Research model from your own writing
 
+**Uploads are linked**: every uploaded document (.docx, .pdf, .txt, .md) is analysed and the thesis title, variables and paths it implies arrive as one proposal in the inbox. Approve it and the research model appears, and the slides and the Word export use it. No “H1: A affects B” sentences are needed: without them the model is inferred from the title or purpose statement (e.g. “The effect of A on B: the mediating role of C”). Numbered hypotheses still take precedence; existing variables with the same name are reused. The automatic analysis can be switched off in Settings.
+
 In **Research core → Research model**, choose **From my writing** and paste or upload your draft (`.docx`, `.txt`, `.md`, `.tex`):
 
 - **Rule-based reading (free, offline)** finds hypothesis sentences in Chinese or English, such as "H1: Perceived usefulness positively affects behavioral intention", "Trust moderates the relationship between X and Y" or "Attitude mediates …", and works out X, Y, mediators and moderators.
