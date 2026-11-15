@@ -85,7 +85,7 @@ The Design check tab follows Bono & McNamara (2011): five pre-submission design 
 
 ## Exam practice
 
-A section of its own. **Questions from an uploaded paper**: drop a PDF, .docx or .txt; the hub detects the title, methods, labelled hypotheses and key terms and drafts essay questions with outlines — only the ones you tick are saved (tick AI for questions written from the text). PDFs are read best with Poppler's `pdftotext`; the built-in fallback only handles simple Latin-text PDFs.
+A section of its own. **Questions from an uploaded paper**: drop a PDF, .docx or .txt; the hub detects the title, methods, labelled hypotheses and key terms and drafts essay questions with outlines — only the ones you tick are saved (tick AI for questions written from the text). PDFs are read by the built-in reader (Chinese included); scanned PDFs have no text.
 
 Folders for questions and readings, question prediction (rules or AI), question analysis with an answer outline, reading analysis from 5C notes, and timed essay practice graded by outline coverage (plus AI comments when available). Every hand-in is kept, so each question shows its score history; Weak spots ranks folders by average latest score; a spaced-review schedule (1→3→7→14→30→60 days, back to tomorrow after a weak answer) drives the Review today list for questions and papers. A 16-question research-methods starter bank (in Chinese, original wording) is included.
 
@@ -99,7 +99,7 @@ Export Word builds a .docx draft: cover, acknowledgements, abstract, contents an
 
 ## Research model from your own writing
 
-**Uploads are linked**: every uploaded document (.docx, .pdf, .txt, .md) is analysed and the thesis title, variables and paths it implies arrive as one proposal in the inbox. Approve it and the research model appears, and the slides and the Word export use it. No “H1: A affects B” sentences are needed: without them the model is inferred from the title or purpose statement (e.g. “The effect of A on B: the mediating role of C”). Numbered hypotheses still take precedence; existing variables with the same name are reused. The automatic analysis can be switched off in Settings.
+**Uploads are linked**: every uploaded document (.docx, .pdf, .txt, .md) is analysed into one proposal in the inbox; nothing is written until you approve, and single items can be unticked. It carries the research model (from numbered hypotheses, else the title or purpose statement, else the stated variable roles — no “H1: A affects B” needed), path signs inferred from the text, and the thesis title, 5C story sentences and design profile for fields that are still empty. Without a recognisable model (e.g. a qualitative study) the title and story are still proposed. With an AI assistant set up, the AI reads the text instead and falls back to the rules on failure. The built-in PDF reader handles Chinese and English text PDFs without extra software; scanned PDFs have no text.
 
 In **Research core → Research model**, choose **From my writing** and paste or upload your draft (`.docx`, `.txt`, `.md`, `.tex`):
 

@@ -182,14 +182,34 @@ def paper_facts(text: str, filename: str = "") -> dict:
         return (len(ln.split()) >= 4 and len(ln) <= 200) or (topic_mod.has_cjk(ln) and 8 <= len(ln) <= 80)
 
     head = lines[:25]
-    first = next((i for i, ln in enumerate(head) if titleish(ln)), None)
+    org = re.compile(r"(?:大學|學系|研究所|學院|學位學程|系所|University|Department|College|School|Institute)\s*$", re.I)
+    marker = next((i for i, ln in enumerate(head[:12]) if re.fullmatch(r"(?:碩士|博士)(?:學位)?論文|(?:博士|碩士)?論文計畫書|研究計畫書|(?:master'?s?|doctoral|ph\.?d\.?)\s+(?:thesis|dissertation)", ln, re.I)), None)
+    first = None
+    if marker is not None:  # a thesis cover: the title is what follows 「碩士論文」, often on two or three lines
+        block = []
+        for ln in head[marker + 1: marker + 5]:
+            if org.search(ln) or re.search(r"教授|研究生|advisor|student", ln, re.I) or (block and topic_mod.has_cjk(block[0]) != topic_mod.has_cjk(ln)):
+                break
+            block.append(ln)
+        if block and len("".join(block)) >= 8:
+            joined = ("" if topic_mod.has_cjk(block[0]) else " ").join(block)
+            return _facts(joined, text, filename, lines)
+    first = next((i for i, ln in enumerate(head) if titleish(ln) and not org.search(ln)), None)
     title = stem
     if first is not None:
         title = head[first]
         nxt = head[first + 1] if first + 1 < len(head) else ""
-        label = re.search(r"[:：]|教授|研究生|作者|advisor|author|student|university|大學|學系|研究所", nxt, re.I)
+        label = re.search(r"^[^:：]{0,10}[:：]|教授|研究生|作者|advisor|author|student|university|大學|學系|研究所", nxt, re.I)
         if nxt and titleish(nxt) and not label and not re.search(r"[:：]", title) and not head[first].endswith((".", "。")) and len(title) < 90:
             title += ("" if topic_mod.has_cjk(title) else " ") + head[first + 1]  # titles often wrap onto a second line
+            last = head[first + 2] if first + 2 < len(head) else ""
+            if last and len(last.split()) <= 3 and re.fullmatch(r"[A-Z][A-Za-z\- ]+", last) and not org.search(last):
+                title += " " + last
+    return _facts(title, text, filename, lines)
+
+
+def _facts(title: str, text: str, filename: str, lines: list[str]) -> dict:
+    from . import integrations as integ
     hits = sorted(((len(re.findall(pattern, text, re.I)), zh, en) for pattern, zh, en in METHODS), reverse=True)
     methods = [(zh, en) for n, zh, en in hits if n >= (3 if len(text) > 5000 else 1)][:2]
     try:

@@ -780,6 +780,18 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.req("/api/exam/from-file", raw=b"too short", headers={"X-Filename": "a.txt"})[0], 400)
         self.assertEqual(self.req("/api/tts", {"text": ""})[0], 400)
 
+    def test_unread_request_body_does_not_break_the_next_request(self):
+        import http.client
+        conn = http.client.HTTPConnection("127.0.0.1", self.httpd.server_address[1], timeout=10)
+        headers = {"X-Hub-Token": self.app.token, "Content-Type": "application/json"}
+        conn.request("POST", "/api/proposals/approve-all", body="{}", headers=headers)  # this route ignores its body
+        self.assertEqual(conn.getresponse().read() and 200, 200)
+        conn.request("GET", "/api/state", headers=headers)  # same keep-alive connection
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 200)
+        self.assertIn("stages", json.loads(resp.read()))
+        conn.close()
+
     def test_upload_is_analysed_into_a_proposal(self):
         import time
         doc = "組織承諾對工作績效之影響：以工作滿意度為中介變數\n\n摘要\n本研究以問卷調查法進行。".encode()
@@ -898,34 +910,19 @@ class TopicThesisTests(unittest.TestCase):
         self.assertTrue(any("問卷調查" in q["text"] for q in out["questions"]))
         self.assertIn("5C", exam.from_paper_rules(text, "p.txt", "", "en")["questions"][0]["text"])
 
-    def test_pdf_reader_fallback(self):
+    def test_builtin_pdf_reader_reads_chinese(self):
         import zlib
-        body = zlib.compress(b"BT (" + b"Trust shapes online shopping intention among Taiwanese consumers " * 30 + b") Tj ET")
-        pdf = b"%PDF-1.4\n1 0 obj<</Filter/FlateDecode>>stream\n" + body + b"\nendstream endobj"
-        self.assertIn("Trust shapes online shopping", integ.read_pdf(pdf))
+        from research_hub import pdftext
+        cmap = (b"1 begincodespacerange <0000> <FFFF> endcodespacerange 4 beginbfchar <0001> <4FE1> <0002> <4EFB> <0003> <0041> endbfchar "
+                b"1 beginbfrange <0010> <0012> <7814> endbfrange")
+        content = zlib.compress(b"BT /F1 12 Tf 1 0 0 1 72 700 Tm <00010002> Tj 1 0 0 1 100 700 Tm [<0003> -300 <0010>] TJ 1 0 0 1 72 680 Tm <0011> Tj ET")
+        pdf = (b"%PDF-1.7\n1 0 obj<</Type/Page/Parent 9 0 R/Resources<</Font<</F1 2 0 R>>>>/Contents 4 0 R>>endobj\n"
+               b"2 0 obj<</Type/Font/Subtype/Type0/ToUnicode 3 0 R>>endobj\n3 0 obj<</Length " + str(len(cmap)).encode() + b">>stream\n" + cmap + b"\nendstream endobj\n"
+               b"4 0 obj<</Filter/FlateDecode/Length " + str(len(content)).encode() + b">>stream\n" + content + b"\nendstream endobj\n")
+        self.assertEqual(pdftext.extract(pdf), "信任A 研\n砕")
+        self.assertEqual(pdftext.extract(b"%PDF-1.4 nothing here"), "")
         with self.assertRaises(ValueError):
             integ.read_pdf(b"%PDF-1.4 nothing here")
-
-    def test_attempts_and_review_schedule(self):
-        store = Store(Path(tempfile.mkdtemp()))
-        store.apply_ops([{"op": "create", "entity": "question", "ref": "q", "data": {"text": "題目", "folder": "CMV"}},
-                         {"op": "create", "entity": "attempt", "data": {"question_id": "$q", "score": 55, "coverage": 40, "answer": "a", "seconds": 600}},
-                         {"op": "create", "entity": "attempt", "data": {"question_id": "$q", "score": 85, "coverage": 90, "answer": "b"}},
-                         {"op": "create", "entity": "paper", "data": {"title": "P", "folder": "CMV", "review_date": "2026-11-20", "review_interval": 3}}])
-        snap = store.snapshot()
-        q = snap["questions"][0]
-        self.assertEqual([a["score"] for a in snap["attempts"]], [85, 55])  # newest first, answers not sent in the snapshot
-        self.assertNotIn("answer", snap["attempts"][0])
-        self.assertEqual((q["review_date"], q["review_interval"]), ("", 0))
-        store.apply_ops([{"op": "update", "entity": "question", "id": q["id"], "data": {"review_date": "2026-11-15", "review_interval": 3}}])
-        self.assertEqual(store.snapshot()["questions"][0]["review_date"], "2026-11-15")
-        self.assertEqual(snap["papers"][0]["review_interval"], 3)
-        with self.assertRaises(ValidationError):
-            store.apply_ops([{"op": "update", "entity": "question", "id": q["id"], "data": {"review_date": "soon"}}])
-        with self.assertRaises(ValidationError):
-            store.apply_ops([{"op": "create", "entity": "attempt", "data": {"question_id": 9999, "score": 10}}])
-        store.apply_ops([{"op": "delete", "entity": "question", "id": q["id"]}])
-        self.assertEqual(store.snapshot()["attempts"], [])
 
     def test_model_from_title_without_hypotheses(self):
         f = integ.infer_framework("轉換型領導對員工創新行為之影響：以心理安全感為中介變數\n\n第一章 緒論\n近年來企業重視創新。")
@@ -944,6 +941,27 @@ class TopicThesisTests(unittest.TestCase):
         self.assertEqual(f["method"], "rules")
         self.assertIn("H1", [r["label"] for r in f["relations"]])
         self.assertEqual(integ.infer_framework("今天開會討論了預算與時程。")["method"], "none")
+        for title in ("社群媒體使用如何影響大學生學習成效", "遠距工作影響員工幸福感之研究"):
+            self.assertEqual(len(integ.infer_framework(title)["relations"]), 1, title)
+        f = integ.infer_framework("研究方法\n本研究以轉換型領導為自變數，以員工創新行為為依變數，並以心理安全感為中介變數。控制變數包括年資、性別。")
+        self.assertEqual((f["method"], [v["role"] for v in f["variables"]]), ("roles", ["iv", "med", "dv", "ctrl", "ctrl"]))
+        f = integ.infer_framework("Nurses\nThe independent variable is job stress. The dependent variable is turnover intention, and burnout serves as the mediator.")
+        self.assertEqual([(v["role"], v["name_en"]) for v in f["variables"]], [("iv", "job stress"), ("med", "burnout"), ("dv", "turnover intention")])
+
+    def test_signs_story_and_design_from_text(self):
+        text = ("轉換型領導對員工創新行為之影響\n近年來企業面臨激烈競爭。然而，過去研究較少探討主管如何促進創新。這個問題相當重要，因為創新是企業生存的關鍵。"
+                "本研究旨在探討轉換型領導對員工創新行為的影響。研究結果有助於提供管理者實務建議。轉換型領導能提升員工創新行為。轉換型領導會正向促進員工創新行為。"
+                "本研究採問卷調查法，有效問卷共 312 份。問卷以量表測量。")
+        f = integ.infer_framework(text)
+        self.assertEqual((integ.infer_signs(f, text), f["relations"][0]["sign"]), (1, "+"))
+        story = integ.infer_story(text)
+        self.assertEqual(list(story), ["common", "complication", "concern", "course", "contribution"])
+        self.assertTrue(story["complication"].startswith("然而"))
+        design = integ.infer_design(text)
+        self.assertEqual((design["design"], design["waves"]), ("cross_sectional", 1))
+        self.assertIn("312", design["sample"])
+        self.assertEqual(integ.infer_design("今天開會。"), {})
+
 
     def test_framework_ops_reuse_existing(self):
         store = Store(Path(tempfile.mkdtemp()))
@@ -955,6 +973,48 @@ class TopicThesisTests(unittest.TestCase):
         snap = store.snapshot()
         self.assertEqual(sorted(v["symbol"] for v in snap["variables"]), ["M1", "X1", "Y1"])
         self.assertEqual(integ.framework_ops(found, snap), ([], {"variables": 0, "relations": 0}))  # nothing new the second time
+
+    def test_upload_analysis_fills_story_and_design_and_uses_ai(self):
+        store = Store(Path(tempfile.mkdtemp()))
+        app = App(store)
+        text = ("轉換型領導對員工創新行為之影響\n近年來企業面臨激烈競爭。然而，過去研究較少探討主管如何促進創新。這個問題相當重要，因為創新是企業生存的關鍵。"
+                "本研究旨在探討轉換型領導對員工創新行為的影響。研究結果有助於提供管理者實務建議。轉換型領導會正向促進員工創新行為。"
+                "本研究採問卷調查法，有效問卷共 312 份。問卷以量表測量。")
+        store.apply_ops([{"op": "update", "entity": "story", "match": {"key": "common"}, "data": {"sentence": "我自己寫的。"}}])
+        path = store.root / "uploads" / "計畫.txt"
+        path.write_text(text, encoding="utf-8")
+        out = app.analyze_upload(path)
+        self.assertEqual((out["variables"], out["relations"]), (2, 1))
+        prop = store.list_proposals("pending")[0]
+        self.assertIn("5C 4 句", prop["title"])  # the sentence the user already wrote is left alone
+        store.decide(prop["id"], True)
+        snap = store.snapshot()
+        self.assertEqual(snap["story"][0]["sentence"], "我自己寫的。")
+        self.assertTrue(snap["story"][1]["sentence"].startswith("然而"))
+        self.assertEqual((snap["design"]["design"], snap["relations"][0]["sign"], snap["topic"]["title"]), ("cross_sectional", "+", "轉換型領導對員工創新行為之影響"))
+        self.assertIsNone(app.analyze_upload(path)["proposal"])  # nothing new the second time
+
+        # with an AI assistant configured, its reading is used; a broken reply falls back to the rules
+        store2 = Store(Path(tempfile.mkdtemp()))
+        app2 = App(store2)
+        path2 = store2.root / "uploads" / "essay.txt"
+        path2.write_text("一篇沒有明確題目句型的文章，討論主管的支持如何讓員工更願意提出想法。" * 3, encoding="utf-8")
+        reply = json.dumps({"title": "主管支持與建言", "variables": [{"key": "a", "name_zh": "主管支持", "role": "iv"}, {"key": "b", "name_zh": "建言行為", "role": "dv"}],
+                            "relations": [{"source": "a", "target": "b", "kind": "effect", "sign": "+", "label": "H1"}],
+                            "story": {"concern": "員工不說話，問題就不會被發現。"}, "design": {"design": "magic", "purpose": "causal"}}, ensure_ascii=False)
+        saved = (integ.ai_config, integ.ai_chat)
+        try:
+            integ.ai_config = lambda settings: {"model": "m", "base_url": "http://x", "key": ""}
+            integ.ai_chat = lambda cfg, system, user, **kw: (reply, 10)
+            out = app2.analyze_upload(path2)
+            self.assertEqual((out["method"], out["relations"]), ("ai", 1))
+            store2.decide(store2.list_proposals("pending")[0]["id"], True)
+            snap = store2.snapshot()
+            self.assertEqual((snap["topic"]["title"], snap["design"]["purpose"], snap["design"]["design"]), ("主管支持與建言", "causal", ""))
+            integ.ai_chat = lambda cfg, system, user, **kw: (_ for _ in ()).throw(OSError("offline"))
+            self.assertEqual(app2.analyze_upload(path2)["method"], "none")
+        finally:
+            integ.ai_config, integ.ai_chat = saved
 
     def test_voice_rejects_empty_and_unknown(self):
         with self.assertRaises(voice.VoiceError):

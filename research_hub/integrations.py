@@ -543,11 +543,10 @@ def default_query(stage: dict, note: str, context: dict) -> str:
 
 # ---------------------------------------------------------------- research model from the user's own writing
 def read_pdf(data: bytes) -> str:
-    """Text of a PDF. Uses ``pdftotext`` (Poppler) when it is installed; otherwise a small built-in reader
-    that handles simple text PDFs. Scanned or CJK-subset PDFs need pdftotext or a .docx/.txt copy."""
+    """Text of a PDF. Uses ``pdftotext`` (Poppler) when it is installed; otherwise the built-in reader
+    (research_hub.pdftext), which also reads Chinese. Scanned PDFs have no text to read."""
     import shutil
     import subprocess
-    import zlib
     exe = shutil.which("pdftotext")
     if exe:
         try:
@@ -557,21 +556,13 @@ def read_pdf(data: bytes) -> str:
                 return text
         except (OSError, subprocess.SubprocessError):
             pass
-    chunks = []
-    for m in re.finditer(rb"stream\r?\n(.*?)endstream", data, re.S):
-        raw = m.group(1)
-        try:
-            raw = zlib.decompress(raw)
-        except zlib.error:
-            pass
-        for block in re.findall(rb"BT(.*?)ET", raw, re.S):
-            parts = re.findall(rb"\((?:\\.|[^\\()])*\)", block)
-            line = b"".join(re.sub(rb"\\([()\\])", rb"\1", part[1:-1]) for part in parts)
-            if line.strip():
-                chunks.append(line.decode("latin-1", errors="replace"))
-    text = "\n".join(chunks)
-    if len(re.findall(r"[A-Za-z]{3,}", text)) < 80:
-        raise ValueError("could not read the text of this PDF — install pdftotext (Poppler), or save it as .docx or .txt")
+    from . import pdftext
+    try:
+        text = pdftext.extract(data)
+    except Exception:  # a malformed file must not take the server down
+        text = ""
+    if len(re.findall(r"[A-Za-z]{3,}|[\u3400-\u9fff]", text)) < 40:
+        raise ValueError("this PDF has no readable text (it is probably scanned images) — use the .docx file or a text PDF")
     return text
 
 
@@ -719,6 +710,9 @@ _T_SPLIT = re.compile(r"\s*(?:、|,|，|與|和|及|以及|\band\b|&)\s*", re.I)
 _T_TAIL = r"(?:之|的)?(?:影響|關係|關聯|效果|效應)(?:之研究|研究|之探討|探討|分析)?"
 _TITLE_ZH = [
     re.compile(r"(?P<x>[^：:，,。]{2,40}?)對(?P<y>[^：:，,。]{2,40}?)" + _T_TAIL),
+    re.compile(r"(?P<x>[^：:，,。]{2,40}?)(?:如何|是否)(?:會)?(?:影響|提升|降低|促進|預測)(?P<y>[^：:，,。？?]{2,40})"),
+    re.compile(r"(?P<x>[^：:，,。對]{2,40}?)(?:影響|預測|提升|促進)(?P<y>[^：:，,。]{2,30}?)(?:之研究|的研究|之探討|之實證)"),
+    re.compile(r"(?P<y>[^：:，,。]{2,30}?)(?:之|的)(?:影響因素|前因|決定因素)(?:之研究|研究|探討)?[：:—–-]\s*(?P<x>[^：:。]{2,60})"),
     re.compile(r"(?P<x>[^：:，,。與和]{2,30}?)(?:與|和)(?P<y>[^：:，,。]{2,30}?)(?:之|的)?(?:關係|關聯)(?:之研究|研究)?"),
 ]
 _TITLE_EN = [
@@ -763,12 +757,41 @@ def _title_model(line: str) -> dict | None:
     return {"xs": xs, "ys": ys, "med": med, "mod": mod, "line": line.strip()[:300]}
 
 
+_NOISE = re.compile(r"[0-9（）()\[\]「」『』%]|^(?:也|並|而|且|及|與|和|在|於|對|為|其|此|該|這|那|將|會|可|能|所|以|從|由|把|被|讓|使)|(?:與|和|及|的|之|對|於|在|為|也|並|等|中|上|下)$"
+                    r"|角色|過程|研究|結果|方面|部分|情形|情況|問題|理論|文獻|學者|本文|整理|探討|分析|\b(?:and|or|the|this|that|these|which|study|paper|et al)\b", re.I)
+
+
+def _credible(found: dict, text: str) -> dict:
+    """Sentences without a hypothesis number match a lot of ordinary prose in a long document. Keep a path
+    only when both ends look like construct names and are used repeatedly in the text."""
+    if not found["relations"]:
+        return found
+    low = text.casefold()
+    need = 1 if len(text) < 1500 else 3
+
+    def ok(v: dict) -> bool:
+        name = v.get("name_zh") or v.get("name_en") or ""
+        size_ok = 2 <= len(name) <= 12 if _CJK.search(name) else 1 <= len(name.split()) <= 4
+        return size_ok and not _NOISE.search(name) and low.count(name.casefold()) >= need
+
+    good = {v["key"] for v in found["variables"] if ok(v)}
+    index, relations = {}, []
+    for i, r in enumerate(found["relations"]):
+        if r["source"] in good and r["target"] in good and (r["kind"] != "moderates" or r.get("moderates") in index):
+            index[i] = len(relations)
+            relations.append({**r, "moderates": index.get(r.get("moderates")) if r["kind"] == "moderates" else None})
+    used = {k for r in relations for k in (r["source"], r["target"])}
+    return {**found, "variables": [v for v in found["variables"] if v["key"] in used], "relations": relations[:12],
+            "sentences": found.get("sentences", []) if relations else []}
+
+
 def infer_framework(text: str, title: str = "") -> dict:
     """A research model from a document even when it has no hypothesis sentences: first the written
     hypotheses, then the title and purpose statements. ``method`` says which one produced the result."""
     found = extract_framework_rules(text)
     if any(r.get("label") for r in found["relations"]):
         return found  # numbered hypotheses (H1, 假設一) are the author's own statement of the model
+    found = _credible(found, text)
     lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
     titles = ([title] if title else []) + [ln for ln in lines[:12] if len(ln) <= 90 and "。" not in ln and not ln.endswith((".", "；", ";"))]
     model = next((m for m in map(_title_model, titles) if m), None)
@@ -776,6 +799,11 @@ def infer_framework(text: str, title: str = "") -> dict:
         return found  # plain sentences such as 「A 對 B 有正向影響」
     if not model:
         model = next((m for m in map(_title_model, [s for s in _sentences(text[:30000]) if _PURPOSE.search(s)][:20]) if m), None)
+    if not model:
+        roles = _role_statements(text)
+        if roles.get("iv") and roles.get("dv"):  # 「以 A 為自變數、B 為依變數」 in the method chapter
+            model = {"xs": roles["iv"], "ys": roles["dv"][:2], "med": (roles.get("med") or [""])[0], "mod": (roles.get("mod") or [""])[0],
+                     "line": "；".join(f"{k}: {'、'.join(v)}" for k, v in roles.items())[:300], "ctrl": roles.get("ctrl", [])}
     if not model:
         return {**found, "method": "none"}
     raw_vars: dict[str, dict] = {}
@@ -804,9 +832,148 @@ def infer_framework(text: str, title: str = "") -> dict:
     if model["mod"]:
         z = var(model["mod"], "mod")
         relations.append({"source": z, "target": ys[0], "kind": "moderates", "sign": "", "label": "", "moderates": direct[0]})
+    for name in model.get("ctrl", []):
+        var(name, "ctrl")
     for i, r in enumerate(relations, 1):
         r["label"] = f"H{i}"
-    return _finish_framework(raw_vars, relations, [model["line"]], "title")
+    return _finish_framework(raw_vars, relations, [model["line"]], "roles" if "ctrl" in model else "title")
+
+
+_ROLE_ZH = [("iv", r"自變(?:數|項)|前因變(?:數|項)|預測變(?:數|項)"), ("dv", r"依變(?:數|項)|應變(?:數|項)|結果變(?:數|項)|效標變(?:數|項)"),
+            ("med", r"中介變(?:數|項)"), ("mod", r"調節變(?:數|項)|干擾變(?:數|項)"), ("ctrl", r"控制變(?:數|項)")]
+_ROLE_EN = [("iv", r"independent variables?|predictors?"), ("dv", r"(?<!in)dependent variables?|outcome variables?|criterion variables?"),
+            ("med", r"mediators?|mediating variables?"), ("mod", r"moderators?|moderating variables?"), ("ctrl", r"control variables?")]
+_NAME = r"([^，,。；;：:（）()為是]{2,40})"
+
+
+def _role_statements(text: str) -> dict[str, list[str]]:
+    """Variables the author names by role: 「以 A 為自變數」「依變數為 B」 "the dependent variable is B"."""
+    roles: dict[str, list[str]] = {}
+
+    def add(role: str, raw: str):
+        for part in _T_SPLIT.split(raw):
+            name = _clean_var(re.sub(r"^(?:本研究|分別|包括|包含|則|以)|(?:等|作|做)$", "", part.strip()))
+            if 2 <= len(name) <= 30 and not any(name in names for names in roles.values()) and not re.search(r"變(?:數|項)|variable", name, re.I):
+                roles.setdefault(role, [])
+                roles[role].append(name)
+
+    for sentence in _sentences(text[:200000]):
+        for role, word in _ROLE_ZH:
+            for m in re.finditer(r"以([^，,。；;：:（）()]{2,40}?)(?:作)?為(?:本研究之|本研究的)?(?:" + word + r")", sentence):
+                add(role, m.group(1))
+            for m in re.finditer(r"(?:" + word + r")(?:則)?(?:為|是|包括|包含|有|：|:)" + _NAME, sentence):
+                add(role, m.group(1))
+        for role, word in _ROLE_EN:
+            for m in re.finditer(r"(?:the\s+)?(?:" + word + r")\s+(?:is|are|was|were|include[sd]?)\s+([A-Za-z][A-Za-z ,\-]{2,80}?)(?:[.;]|,\s+(?:and|while|whereas)\b|$)", sentence, re.I):
+                add(role, m.group(1))
+            for m in re.finditer(r"([A-Za-z][A-Za-z \-]{2,50}?)\s+(?:is|are|was|were|serves?)\s+(?:treated\s+|used\s+)?as\s+(?:the\s+|an?\s+)?(?:" + word + r")", sentence, re.I):
+                add(role, m.group(1))
+    return {k: v[:4] for k, v in roles.items() if v}
+
+
+_POS = re.compile(r"正向|正相關|正面|提升|提高|增加|增進|促進|強化|有助於|positive(?:ly)?|increas|enhanc|improv|promot|strengthen|foster", re.I)
+_NEG = re.compile(r"負向|負相關|負面|降低|減少|減低|抑制|削弱|阻礙|negative(?:ly)?|decreas|reduc|lower|weaken|undermin|inhibit", re.I)
+
+
+def infer_signs(found: dict, text: str) -> int:
+    """Fill in + / - for paths that have none, from sentences that mention both variables. Returns how many."""
+    names = {v["key"]: (v.get("name_zh") or v.get("name_en") or "") for v in found.get("variables", [])}
+    sentences = _sentences(text[:300000])
+    filled = 0
+    for r in found.get("relations", []):
+        if r.get("sign") or r["kind"] != "effect":
+            continue
+        a, b = names.get(r["source"], ""), names.get(r["target"], "")
+        if not a or not b:
+            continue
+        pos = neg = 0
+        for s in sentences:
+            low = s.casefold()
+            ia, ib = low.find(a.casefold()), low.find(b.casefold())
+            if ia < 0 or ib < 0 or ia > ib:
+                continue  # only "A … B" order says something about A's effect on B
+            between = s[ia: ib + len(b) + 12]
+            pos += len(_POS.findall(between))
+            neg += len(_NEG.findall(between))
+        if pos + neg and (pos >= 2 * neg + 1 or neg >= 2 * pos + 1):
+            r["sign"] = "+" if pos > neg else "-"
+            filled += 1
+    return filled
+
+
+_STORY_CUES = {
+    "common": r"近年來|近年|隨著|長期以來|過去研究|既有研究|先前研究|已知|普遍認為|in recent years|recently|over the past|prior research|previous (?:research|studies)|it is well (?:known|established)|scholars have",
+    "complication": r"然而|但是|不過|儘管|卻|尚未|仍未|缺乏|鮮少|較少|不足|有限|however|yet\b|nevertheless|despite|little is known|remains? unclear|few studies|has not been|lack of|gap",
+    "concern": r"重要|關鍵|因此有必要|值得|亟需|不容忽視|將導致|important|crucial|critical|matters? because|essential|urgent|at stake",
+    "course": r"本研究|本文|旨在|目的在於|this (?:study|paper|research|article|thesis)|we (?:examine|investigate|explore|test|propose|develop)|the purpose of",
+    "contribution": r"貢獻|有助於|提供.{0,12}(?:建議|參考|啟示)|實務意涵|理論意涵|contribut|implications?|advances? (?:our )?understanding|extends? the literature",
+}
+
+
+def infer_story(text: str) -> dict[str, str]:
+    """One sentence per C from the opening of the document, picked by the signal words of each move
+    (common ground → complication → concern → course of action → contribution), in that order."""
+    intro = text[:12000]
+    start = max(intro.find("摘要"), intro.lower().find("abstract"), 0)
+    sentences = [s for s in _sentences(intro[start:]) if 12 <= len(s) <= 220 and not re.search(r"\.{4,}|…{2,}|\d+\s*$|^關鍵[詞字]|^keywords", s, re.I)]
+    out: dict[str, str] = {}
+    position = 0
+    for key, cue in _STORY_CUES.items():
+        for i in range(position, len(sentences)):
+            if re.search(cue, sentences[i], re.I) and sentences[i] not in out.values():
+                out[key] = sentences[i]
+                position = i + 1 if key != "course" else i  # the purpose sentence often also states the contribution
+                break
+    return out
+
+
+def infer_design(text: str) -> dict:
+    """Design facts stated in the method section: data design, number of waves, sample sentence, purpose."""
+    body = text[:300000]
+    out: dict = {}
+    count = lambda pattern: len(re.findall(pattern, body, re.I))  # noqa: E731
+    experiment = count(r"實驗設計|實驗組|操弄|隨機分派|random(?:ly)? assign|manipulat|experimental (?:design|condition)")
+    longitudinal = count(r"縱貫|追蹤調查|兩階段|三階段|兩個時點|三個時點|分時點|時間落差|longitudinal|time[- ]lagged|panel data|two[- ]wave|three[- ]wave|multi[- ]wave")
+    survey = count(r"問卷|量表|survey|questionnaire")
+    qualitative = count(r"訪談|質性|焦點團體|焦點群體|個案研究|interview|qualitative|focus group|case study")
+    if qualitative > max(survey, 4):
+        survey = experiment = longitudinal = 0  # interviews and cases: no quantitative design to record
+    if experiment >= 3:
+        out["design"] = "experiment"
+    elif longitudinal >= 2:
+        out["design"] = "longitudinal"
+    elif survey >= 3:
+        out["design"] = "cross_sectional"
+    waves = re.search(r"([二兩三四五2-5]|two|three|four)\s*(?:個)?(?:階段|時點|波|[- ]?waves?|[- ]?time points?)", body, re.I)
+    if waves and out.get("design") == "longitudinal":
+        out["waves"] = {"二": 2, "兩": 2, "三": 3, "四": 4, "五": 5, "two": 2, "three": 3, "four": 4}.get(waves.group(1).lower(), int(waves.group(1)) if waves.group(1).isdigit() else 2)
+    elif out.get("design") == "cross_sectional":
+        out["waves"] = 1
+    sample = next((s for s in _sentences(body) if re.search(r"(?:有效)?(?:問卷|樣本)\s*(?:共|為|計)?\s*\d+|共(?:回收|發放|訪談)\s*\d+|\d+\s*(?:份|位|名|participants|respondents|employees|students)|[Nn]\s*=\s*\d+", s)
+                   and 15 <= len(s) <= 260), "")
+    if sample:
+        out["sample"] = sample
+    if "design" in out:  # a purpose only means something next to a quantitative design
+        if out["design"] == "experiment" or count(r"因果|causal|中介效果|中介變|mediat") >= 3:
+            out["purpose"] = "causal"
+        elif out["design"] == "longitudinal":
+            out["purpose"] = "change"
+        elif count(r"相關|關聯|correlat|associat") >= 3:
+            out["purpose"] = "describe"
+    return out
+
+
+def analysis_prompt(text: str, filename: str) -> tuple[str, str]:
+    system = ("You read a graduate student's research document and return what it implies for their research dashboard. "
+              "Reply with ONE JSON object: {\"title\": str, \"variables\": [{\"key\": str, \"name_zh\": str, \"name_en\": str, "
+              "\"role\": \"iv\"|\"dv\"|\"med\"|\"mod\"|\"ctrl\"}], \"relations\": [{\"source\": key, \"target\": key, "
+              "\"kind\": \"effect\"|\"moderates\", \"sign\": \"+\"|\"-\"|\"\", \"label\": str, \"moderates\": index of the moderated effect or null}], "
+              "\"story\": {\"common\": str, \"complication\": str, \"concern\": str, \"course\": str, \"contribution\": str}, "
+              "\"design\": {\"purpose\": \"describe\"|\"change\"|\"causal\"|\"\", \"design\": \"cross_sectional\"|\"longitudinal\"|\"experiment\"|\"\", "
+              "\"waves\": int, \"sample\": str}}. Infer the research model even when hypotheses are not written out, from the title, purpose and "
+              "arguments. Each story value is ONE sentence in the document's language. Use only what the text supports; leave a field empty rather than guess.")
+    excerpt = text[:10000] + ("\n…\n" + text[-2500:] if len(text) > 13000 else "")
+    return system, f"File: {filename}\n\n{excerpt}"
 
 
 def framework_ops(found: dict, snapshot: dict) -> tuple[list[dict], dict]:

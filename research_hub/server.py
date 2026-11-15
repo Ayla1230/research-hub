@@ -76,25 +76,78 @@ class App:
             return None
         from . import exam
         snap = self.store.snapshot()
+        settings = self.store.settings()
         facts = exam.paper_facts(text, path.name)
-        found = integ.infer_framework(text, facts["title"])
+        found, story, design, title_found, used_ai = None, {}, {}, facts["title"], False
+        cfg = integ.ai_config(settings) if settings.get("auto_analyze_ai", True) else None
+        if cfg:  # the AI assistant reads the argument, so it also finds models that no title pattern covers
+            try:
+                self.store.take_quota("ai")
+                raw, tokens = integ.ai_chat(cfg, *integ.analysis_prompt(text, path.name))
+                self.store.add_tokens("ai", tokens)
+                data = integ.parse_json_block(raw) or {}
+                ai_found = integ.normalize_framework(data, "ai")
+                if ai_found.get("relations"):
+                    found, used_ai = ai_found, True
+                    story = {k: str(v).strip()[:600] for k, v in (data.get("story") or {}).items() if k in integ._STORY_CUES and str(v or "").strip()}
+                    d = data.get("design") or {}
+                    design = {k: d[k] for k in ("purpose", "design", "sample") if str(d.get(k) or "").strip()}
+                    if str(d.get("waves") or "").isdigit():
+                        design["waves"] = int(d["waves"])
+                    title_found = str(data.get("title") or "").strip()[:200] or title_found
+            except Exception:
+                found = None  # quota, network or a bad reply: fall back to the built-in rules
+        if not found:
+            found = integ.infer_framework(text, facts["title"])
+        signs = integ.infer_signs(found, text)
+        story = story or integ.infer_story(text)
+        design = design or integ.infer_design(text)
+        from .store import DESIGN_PURPOSES, DESIGN_TYPES
+        design = {k: v for k, v in design.items() if (k == "purpose" and v in DESIGN_PURPOSES[1:]) or (k == "design" and v in DESIGN_TYPES[1:])
+                  or (k == "waves" and isinstance(v, int) and 1 <= v <= 20) or (k == "sample" and str(v).strip())}
+        if "sample" in design:
+            design["sample"] = str(design["sample"])[:2000]
         ops, counts = integ.framework_ops(found, snap)
         topic = snap.get("topic") or {}
-        set_title = bool(facts["title"]) and not (topic.get("title") or "").strip() and found["method"] != "none"
+        research_doc = found["method"] != "none" or len(story) >= 3  # a model, or at least a recognisable introduction
+        set_title = bool(title_found) and not (topic.get("title") or "").strip() and research_doc
         if set_title:
-            ops.append({"op": "update", "entity": "topic", "match": {"key": "main"}, "data": {"title": facts["title"][:200]}})
+            ops.append({"op": "update", "entity": "topic", "match": {"key": "main"}, "data": {"title": title_found[:200]}})
+        # 5C story and design profile: only fields that are still empty, never overwriting what the user wrote
+        filled = {r["key"] for r in snap.get("story", []) if (r.get("sentence") or "").strip()}
+        new_story = {k: v for k, v in story.items() if k not in filled} if research_doc else {}
+        for key, sentence in new_story.items():
+            ops.append({"op": "update", "entity": "story", "match": {"key": key}, "data": {"sentence": sentence[:600]}})
+        current = snap.get("design") or {}
+        new_design = {k: v for k, v in design.items() if not current.get(k)} if research_doc else {}
+        if new_design:
+            ops.append({"op": "update", "entity": "design", "match": {"key": "main"}, "data": new_design})
         if not ops:
             return {"proposal": None, "method": found["method"], **counts}
-        zh = self.store.settings().get("language") != "en"
+        zh = settings.get("language") != "en"
         sentences = "；".join(found.get("sentences", [])[:3])[:600]
+        extras = [(f"5C {len(new_story)} 句" if zh else f"{len(new_story)} story sentences") if new_story else "",
+                  ("研究設計" if zh else "design profile") if new_design else "", ("論文題目" if zh else "thesis title") if set_title else ""]
+        extras = [x for x in extras if x]
         if zh:
-            how = {"rules": "文中的假設句", "title": "題目或研究目的"}.get(found["method"], found["method"])
-            summary = f"從「{path.name}」的{how}辨識：{sentences}。確認後會畫成研究架構圖，簡報與 Word 匯出會直接使用。"
-            title = f"{path.name}：{counts['variables']} 個變數、{counts['relations']} 條路徑" + ("、論文題目" if set_title else "")
+            how = "AI 助理" if used_ai else {"rules": "文中的假設句", "title": "題目或研究目的", "roles": "文中對各變數角色的說明"}.get(found["method"], found["method"])
+            summary = (f"從「{path.name}」的{how}辨識" + (f"：{sentences}" if sentences else "") + "。"
+                       + (f"其中 {signs} 條路徑依內文判斷了正負方向。" if signs else "")
+                       + "確認後會畫成研究架構圖，簡報與 Word 匯出會直接使用；不要的項目可以取消勾選。")
+            parts = ([f"{counts['variables']} 個變數、{counts['relations']} 條路徑"] if counts["variables"] or counts["relations"] else []) + extras
+            title = f"{path.name}：" + "、".join(parts)
+            if found["method"] == "none":
+                summary = f"從「{path.name}」讀到題目與緒論的重點句，但沒有辨識出「誰影響誰」的架構（可能是質性研究，或題目不是變數關係的寫法）。確認後會填入尚未填寫的欄位；架構圖可到「PROCESS 模型範本」選一個套用。"
         else:
-            how = {"rules": "written hypotheses", "title": "the title or purpose statement"}.get(found["method"], found["method"])
-            summary = f"Read from {path.name} ({how}): {sentences}. Approve to draw the research model; the slides and the Word export then use it."
-            title = f"{path.name}: {counts['variables']} variables, {counts['relations']} paths" + (", thesis title" if set_title else "")
+            how = "the AI assistant" if used_ai else {"rules": "written hypotheses", "title": "the title or purpose statement", "roles": "the stated variable roles"}.get(found["method"], found["method"])
+            summary = (f"Read from {path.name} ({how})" + (f": {sentences}" if sentences else "") + ". "
+                       + (f"{signs} path sign(s) inferred from the text. " if signs else "")
+                       + "Approve to draw the research model; the slides and the Word export then use it. Untick anything you do not want.")
+            parts = ([f"{counts['variables']} variables, {counts['relations']} paths"] if counts["variables"] or counts["relations"] else []) + extras
+            title = f"{path.name}: " + ", ".join(parts)
+            if found["method"] == "none":
+                summary = (f"Read the title and the key introduction sentences from {path.name}, but found no “what affects what” model (a qualitative study, "
+                           "or a title that is not written as a relation). Approving fills the empty fields; for the diagram, pick a PROCESS template.")
         try:
             out = self.store.propose("upload", title, ops, summary)
         except ValidationError:
@@ -239,6 +292,7 @@ def make_handler(app: App):
             length = int(self.headers.get("Content-Length") or 0)
             if length > limit:
                 raise ValidationError(f"request too large (limit {limit // (1024 * 1024)} MB)")
+            self._unread = 0
             return self.rfile.read(length) if length else b""
 
         def _payload(self) -> dict:
@@ -357,6 +411,10 @@ def make_handler(app: App):
             url = urlparse(self.path)
             path, qs = url.path, parse_qs(url.query)
             try:
+                self._unread = max(0, int(self.headers.get("Content-Length") or 0))
+            except ValueError:
+                self._unread = 0
+            try:
                 if path.startswith("/api/agent/"):
                     if not self._agent_ok():
                         return self._error(401, "invalid agent token")
@@ -370,6 +428,19 @@ def make_handler(app: App):
                 return self._error(400, str(e))
             except Exception as e:  # pragma: no cover
                 return self._error(500, f"{type(e).__name__}: {e}")
+            finally:
+                # A route that did not read its request body would leave those bytes on the connection, where
+                # they become the start of the next request ("{}GET /api/state"). Drain small ones, drop big ones.
+                left = getattr(self, "_unread", 0)
+                if left:
+                    if left <= 1024 * 1024:
+                        try:
+                            self.rfile.read(left)
+                        except OSError:
+                            self.close_connection = True
+                    else:
+                        self.close_connection = True
+                    self._unread = 0
 
         # ---------------------------------------------------------- GET routes
         def _get(self, path: str, qs: dict):
@@ -551,6 +622,7 @@ def make_handler(app: App):
                     n += 1
                     target = target_dir / f"{stem} ({n}){suffix}"
                 remaining = length
+                self._unread = 0  # this route reads the body itself; on a failed upload the connection is closed below
                 try:  # stream to disk in chunks instead of holding the whole file in memory
                     with target.open("wb") as fh:
                         while remaining:
@@ -563,6 +635,7 @@ def make_handler(app: App):
                         raise ValidationError("upload interrupted")
                 except BaseException:
                     target.unlink(missing_ok=True)
+                    self.close_connection = True
                     raise
                 rel = target.relative_to(store.root / "uploads").as_posix()
                 res = store.apply_ops([{"op": "create", "entity": "file", "data": {
