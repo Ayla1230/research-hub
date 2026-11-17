@@ -31,6 +31,7 @@ from .store import ENTITIES, QuotaError, Store, ValidationError
 
 WEB = Path(__file__).with_name("web")
 MAX_UPLOAD = 300 * 1024 * 1024
+ANALYZABLE = {".docx", ".pdf", ".txt", ".md", ".tex"}
 MAX_JSON = 20 * 1024 * 1024
 LOOPBACK = {"localhost", "127.0.0.1", "::1"}
 mimetypes.add_type("text/javascript", ".js")
@@ -60,6 +61,101 @@ class App:
                     pass
 
     # -------------------------------------------------------------- folder watcher
+    def analyze_upload(self, path: Path, raise_errors: bool = False) -> dict | None:
+        """Read an uploaded document and queue what it implies for the rest of the workspace (thesis title,
+        variables, hypothesised paths) as ONE proposal in the inbox. Nothing changes until the user approves."""
+        try:
+            text = integ.read_document(path.read_bytes(), path.name).strip()
+        except (ValueError, OSError) as e:
+            if raise_errors:
+                raise ValidationError(str(e)) from None
+            return None
+        if len(text) < 20:
+            if raise_errors:
+                raise ValidationError("the file has too little text to analyse")
+            return None
+        from . import exam
+        snap = self.store.snapshot()
+        settings = self.store.settings()
+        facts = exam.paper_facts(text, path.name)
+        found, story, design, title_found, used_ai = None, {}, {}, facts["title"], False
+        cfg = integ.ai_config(settings) if settings.get("auto_analyze_ai", True) else None
+        if cfg:  # the AI assistant reads the argument, so it also finds models that no title pattern covers
+            try:
+                self.store.take_quota("ai")
+                raw, tokens = integ.ai_chat(cfg, *integ.analysis_prompt(text, path.name))
+                self.store.add_tokens("ai", tokens)
+                data = integ.parse_json_block(raw) or {}
+                ai_found = integ.normalize_framework(data, "ai")
+                if ai_found.get("relations"):
+                    found, used_ai = ai_found, True
+                    story = {k: str(v).strip()[:600] for k, v in (data.get("story") or {}).items() if k in integ._STORY_CUES and str(v or "").strip()}
+                    d = data.get("design") or {}
+                    design = {k: d[k] for k in ("purpose", "design", "sample") if str(d.get(k) or "").strip()}
+                    if str(d.get("waves") or "").isdigit():
+                        design["waves"] = int(d["waves"])
+                    title_found = str(data.get("title") or "").strip()[:200] or title_found
+            except Exception:
+                found = None  # quota, network or a bad reply: fall back to the built-in rules
+        if not found:
+            found = integ.infer_framework(text, facts["title"])
+        signs = integ.infer_signs(found, text)
+        story = story or integ.infer_story(text)
+        design = design or integ.infer_design(text)
+        from .store import DESIGN_PURPOSES, DESIGN_TYPES
+        design = {k: v for k, v in design.items() if (k == "purpose" and v in DESIGN_PURPOSES[1:]) or (k == "design" and v in DESIGN_TYPES[1:])
+                  or (k == "waves" and isinstance(v, int) and 1 <= v <= 20) or (k == "sample" and str(v).strip())}
+        if "sample" in design:
+            design["sample"] = str(design["sample"])[:2000]
+        ops, counts = integ.framework_ops(found, snap)
+        topic = snap.get("topic") or {}
+        research_doc = found["method"] != "none" or len(story) >= 3  # a model, or at least a recognisable introduction
+        set_title = bool(title_found) and not (topic.get("title") or "").strip() and research_doc
+        if set_title:
+            ops.append({"op": "update", "entity": "topic", "match": {"key": "main"}, "data": {"title": title_found[:200]}})
+        # 5C story and design profile: only fields that are still empty, never overwriting what the user wrote
+        filled = {r["key"] for r in snap.get("story", []) if (r.get("sentence") or "").strip()}
+        new_story = {k: v for k, v in story.items() if k not in filled} if research_doc else {}
+        for key, sentence in new_story.items():
+            ops.append({"op": "update", "entity": "story", "match": {"key": key}, "data": {"sentence": sentence[:600]}})
+        current = snap.get("design") or {}
+        new_design = {k: v for k, v in design.items() if not current.get(k)} if research_doc else {}
+        if new_design:
+            ops.append({"op": "update", "entity": "design", "match": {"key": "main"}, "data": new_design})
+        if not ops:
+            return {"proposal": None, "method": found["method"], **counts}
+        zh = settings.get("language") != "en"
+        sentences = "；".join(found.get("sentences", [])[:3])[:600]
+        extras = [(f"5C {len(new_story)} 句" if zh else f"{len(new_story)} story sentences") if new_story else "",
+                  ("研究設計" if zh else "design profile") if new_design else "", ("論文題目" if zh else "thesis title") if set_title else ""]
+        extras = [x for x in extras if x]
+        if zh:
+            how = "AI 助理" if used_ai else {"rules": "文中的假設句", "title": "題目或研究目的", "roles": "文中對各變數角色的說明"}.get(found["method"], found["method"])
+            summary = (f"從「{path.name}」的{how}辨識" + (f"：{sentences}" if sentences else "") + "。"
+                       + (f"其中 {signs} 條路徑依內文判斷了正負方向。" if signs else "")
+                       + "確認後會畫成研究架構圖，簡報與 Word 匯出會直接使用；不要的項目可以取消勾選。")
+            parts = ([f"{counts['variables']} 個變數、{counts['relations']} 條路徑"] if counts["variables"] or counts["relations"] else []) + extras
+            title = f"{path.name}：" + "、".join(parts)
+            if found["method"] == "none":
+                summary = f"從「{path.name}」讀到題目與緒論的重點句，但沒有辨識出「誰影響誰」的架構（可能是質性研究，或題目不是變數關係的寫法）。確認後會填入尚未填寫的欄位；架構圖可到「PROCESS 模型範本」選一個套用。"
+        else:
+            how = "the AI assistant" if used_ai else {"rules": "written hypotheses", "title": "the title or purpose statement", "roles": "the stated variable roles"}.get(found["method"], found["method"])
+            summary = (f"Read from {path.name} ({how})" + (f": {sentences}" if sentences else "") + ". "
+                       + (f"{signs} path sign(s) inferred from the text. " if signs else "")
+                       + "Approve to draw the research model; the slides and the Word export then use it. Untick anything you do not want.")
+            parts = ([f"{counts['variables']} variables, {counts['relations']} paths"] if counts["variables"] or counts["relations"] else []) + extras
+            title = f"{path.name}: " + ", ".join(parts)
+            if found["method"] == "none":
+                summary = (f"Read the title and the key introduction sentences from {path.name}, but found no “what affects what” model (a qualitative study, "
+                           "or a title that is not written as a relation). Approving fills the empty fields; for the diagram, pick a PROCESS template.")
+        try:
+            out = self.store.propose("upload", title, ops, summary)
+        except ValidationError:
+            if raise_errors:
+                raise
+            return None
+        return {"proposal": out["id"], "method": found["method"], **counts}
+
     def add_export(self, data: bytes, name: str) -> str:
         """Keep a file the page generated (e.g. a .pptx) for one download, so the browser
         receives it with a proper UTF-8 filename. Old entries expire after 10 minutes."""
@@ -196,6 +292,7 @@ def make_handler(app: App):
             length = int(self.headers.get("Content-Length") or 0)
             if length > limit:
                 raise ValidationError(f"request too large (limit {limit // (1024 * 1024)} MB)")
+            self._unread = 0
             return self.rfile.read(length) if length else b""
 
         def _payload(self) -> dict:
@@ -314,6 +411,10 @@ def make_handler(app: App):
             url = urlparse(self.path)
             path, qs = url.path, parse_qs(url.query)
             try:
+                self._unread = max(0, int(self.headers.get("Content-Length") or 0))
+            except ValueError:
+                self._unread = 0
+            try:
                 if path.startswith("/api/agent/"):
                     if not self._agent_ok():
                         return self._error(401, "invalid agent token")
@@ -327,6 +428,19 @@ def make_handler(app: App):
                 return self._error(400, str(e))
             except Exception as e:  # pragma: no cover
                 return self._error(500, f"{type(e).__name__}: {e}")
+            finally:
+                # A route that did not read its request body would leave those bytes on the connection, where
+                # they become the start of the next request ("{}GET /api/state"). Drain small ones, drop big ones.
+                left = getattr(self, "_unread", 0)
+                if left:
+                    if left <= 1024 * 1024:
+                        try:
+                            self.rfile.read(left)
+                        except OSError:
+                            self.close_connection = True
+                    else:
+                        self.close_connection = True
+                    self._unread = 0
 
         # ---------------------------------------------------------- GET routes
         def _get(self, path: str, qs: dict):
@@ -508,6 +622,7 @@ def make_handler(app: App):
                     n += 1
                     target = target_dir / f"{stem} ({n}){suffix}"
                 remaining = length
+                self._unread = 0  # this route reads the body itself; on a failed upload the connection is closed below
                 try:  # stream to disk in chunks instead of holding the whole file in memory
                     with target.open("wb") as fh:
                         while remaining:
@@ -520,12 +635,23 @@ def make_handler(app: App):
                         raise ValidationError("upload interrupted")
                 except BaseException:
                     target.unlink(missing_ok=True)
+                    self.close_connection = True
                     raise
                 rel = target.relative_to(store.root / "uploads").as_posix()
                 res = store.apply_ops([{"op": "create", "entity": "file", "data": {
                     "name": target.name, "stored": rel, "size": length, "stage_id": stage_id, "paper_id": paper_id,
                     "mime": mimetypes.guess_type(target.name)[0] or ""}}], actor="user", allow_internal=True)
-                return self._json(200, {"id": res[0]["id"], "name": target.name})
+                if store.settings().get("auto_analyze_uploads", True) and target.suffix.lower() in ANALYZABLE and length <= 40 * 1024 * 1024:
+                    threading.Thread(target=app.analyze_upload, args=(target,), daemon=True).start()
+                return self._json(200, {"id": res[0]["id"], "name": target.name, "analyzing": target.suffix.lower() in ANALYZABLE})
+            if path == "/api/analyze-file":
+                row = store.get("file", int(self._payload().get("id") or 0))
+                if not row:
+                    raise ValidationError("unknown file")
+                target = (store.root / "uploads" / row["stored"]).resolve()
+                if not integ.inside(target, [store.root / "uploads"]) or not target.is_file():
+                    raise ValidationError("file is missing")
+                return self._json(200, app.analyze_upload(target, raise_errors=True) or {"proposal": None})
             if path == "/api/exports":
                 name = unquote(self.headers.get("X-Filename", "")).strip()
                 name = re.sub(r"[\\/:*?\"<>|\x00-\x1f]", "_", Path(name).name)[:180] or "export.bin"
@@ -753,7 +879,7 @@ def make_handler(app: App):
                 result = integ.normalize_framework(integ.parse_json_block(reply), "ai")
                 result["tokens"] = tokens
             else:
-                result = integ.extract_framework_rules(text)
+                result = integ.infer_framework(text)
             existing = {}
             for v in store.snapshot()["variables"]:
                 for name in (v["name_zh"], v["name_en"]):
