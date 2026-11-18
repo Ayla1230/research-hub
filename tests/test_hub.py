@@ -1016,6 +1016,22 @@ class TopicThesisTests(unittest.TestCase):
         finally:
             integ.ai_config, integ.ai_chat = saved
 
+    def test_hook_row_and_intro(self):
+        store = Store(Path(tempfile.mkdtemp()))
+        hk = store.snapshot()["hook"]
+        self.assertEqual(hk["key"], "main")
+        store.apply_ops([{"op": "update", "entity": "hook", "match": {"key": "main"}, "data": {"problematize": "inadequacy", "versions": 2, "origin": "初衷"}}])
+        self.assertEqual(store.snapshot()["hook"]["problematize"], "inadequacy")
+        with self.assertRaises(ValidationError):
+            store.apply_ops([{"op": "update", "entity": "hook", "id": hk["id"], "data": {"problematize": "wrong"}}])
+        with self.assertRaises(ValidationError):
+            store.apply_ops([{"op": "delete", "entity": "hook", "id": hk["id"]}])
+        doc = ("目錄\n第一章 緒論........1\n第二章 文獻探討........5\n\n第一章 緒論\n" + "近年來企業重視創新。然而研究仍不足。" * 20
+               + "\n第二章 文獻探討\n文獻內容。")
+        intro = integ.infer_intro(doc)
+        self.assertTrue(intro.startswith("近年來") and "文獻內容" not in intro)
+        self.assertEqual(integ.infer_intro("沒有章節的短文"), "")
+
     def test_voice_rejects_empty_and_unknown(self):
         with self.assertRaises(voice.VoiceError):
             voice._clean("  ")

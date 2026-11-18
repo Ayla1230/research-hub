@@ -927,6 +927,30 @@ def infer_story(text: str) -> dict[str, str]:
     return out
 
 
+def infer_intro(text: str) -> str:
+    """The introduction section of a document: from 「第一章 緒論」/「Introduction」 to the next chapter heading.
+    Table-of-contents lines (with dot leaders or page numbers) are skipped."""
+    lines = (text or "").splitlines()
+    start = None
+    for i, ln in enumerate(lines):
+        t = ln.strip()
+        if re.search(r"\.{3,}|…{2,}|\s\d{1,3}$", t):
+            continue  # a table-of-contents entry
+        if re.fullmatch(r"(?:第[一1]章\s*)?(?:緒論|導論|前言|緒\s*論)|(?:1\.?|I\.)?\s*Introduction|INTRODUCTION", t, re.I):
+            start = i + 1
+            break
+    if start is None:
+        return ""
+    out = []
+    for ln in lines[start:]:
+        t = ln.strip()
+        if re.fullmatch(r"第[二2]章.{0,20}|(?:2\.?|II\.)\s*[A-Z].{0,60}|(?:Literature Review|Theoretical Background|Theory and Hypothes[ie]s|THEORY.*|LITERATURE.*|METHODS?)", t):
+            break
+        out.append(ln)
+    intro = re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+    return intro[:12000] if len(intro) >= 200 else ""
+
+
 def infer_design(text: str) -> dict:
     """Design facts stated in the method section: data design, number of waves, sample sentence, purpose."""
     body = text[:300000]

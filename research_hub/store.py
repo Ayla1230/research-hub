@@ -37,6 +37,11 @@ MEASURE_SOURCES = ("", "self", "supervisor", "peer", "objective", "manipulated",
 DESIGN_PURPOSES = ("", "describe", "change", "causal")
 DESIGN_TYPES = ("", "cross_sectional", "longitudinal", "experiment")
 CHECK_STATUS = ("", "ok", "issue")
+HOOK_TYPES = ("", "trend", "quote")
+ESTABLISH = ("", "synthesized", "progressive", "noncoherence")
+PROBLEMATIZE = ("", "incompleteness", "inadequacy", "incommensurability")
+CONTRIB_TYPES = ("", "shifting", "creation")
+REWRITE = ("", "ruthless", "iterative", "map")
 QUESTION_KINDS = ("past", "predicted", "practice")
 QUESTION_STATUS = ("new", "practiced", "mastered")
 DIFFICULTY = ("", "easy", "medium", "hard")
@@ -104,6 +109,16 @@ ENTITIES: dict[str, dict] = {
             "review_date": ("date", None), "review_interval": ("int", (0, 365)),
         },
         "required": ("title",),
+    },
+    "hook": {  # the Introduction plan (Grant & Pollock, 2011, "Setting the hook"); fixed row, key "main"
+        "table": "hook",
+        "fields": {
+            "key": ("str", None), "origin": ("text", None), "intro": ("text", None), "versions": ("int", (0, 999)),
+            "hook_type": ("enum", HOOK_TYPES), "establish": ("enum", ESTABLISH), "problematize": ("enum", PROBLEMATIZE),
+            "contribution_type": ("enum", CONTRIB_TYPES), "rewrite": ("enum", REWRITE),
+        },
+        "required": ("key",),
+        "fixed": True,
     },
     "design": {  # one research-design profile per workspace (fixed row, key "main")
         "table": "design",
@@ -284,6 +299,12 @@ CREATE TABLE IF NOT EXISTS story (
   id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, sentence TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
   created TEXT NOT NULL, updated TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS hook (
+  id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, origin TEXT NOT NULL DEFAULT '', intro TEXT NOT NULL DEFAULT '',
+  versions INTEGER NOT NULL DEFAULT 0, hook_type TEXT NOT NULL DEFAULT '', establish TEXT NOT NULL DEFAULT '',
+  problematize TEXT NOT NULL DEFAULT '', contribution_type TEXT NOT NULL DEFAULT '', rewrite TEXT NOT NULL DEFAULT '',
+  created TEXT NOT NULL, updated TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS topic (
   id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, title TEXT NOT NULL DEFAULT '', title_en TEXT NOT NULL DEFAULT '',
   reason TEXT NOT NULL DEFAULT '', benefit TEXT NOT NULL DEFAULT '', audience TEXT NOT NULL DEFAULT '',
@@ -401,6 +422,7 @@ class Store:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN review_interval INTEGER NOT NULL DEFAULT 0")
             stamp = now()
             db.execute("INSERT OR IGNORE INTO topic (key, created, updated) VALUES ('main', ?, ?)", (stamp, stamp))
+            db.execute("INSERT OR IGNORE INTO hook (key, created, updated) VALUES ('main', ?, ?)", (stamp, stamp))
             for key in FIVE_C:
                 db.execute("INSERT OR IGNORE INTO story (key, created, updated) VALUES (?, ?, ?)", (key, stamp, stamp))
             db.execute("INSERT OR IGNORE INTO design (key, created, updated) VALUES ('main', ?, ?)", (stamp, stamp))
@@ -555,6 +577,7 @@ class Store:
                 "relations": rows("SELECT * FROM relations ORDER BY position, id"),
                 "design": (rows("SELECT * FROM design WHERE key='main'") or [{}])[0],
                 "topic": (rows("SELECT * FROM topic WHERE key='main'") or [{}])[0],
+                "hook": (rows("SELECT * FROM hook WHERE key='main'") or [{}])[0],
                 "questions": rows("SELECT * FROM questions ORDER BY folder, position, id"),
                 "attempts": rows("SELECT id, question_id, score, coverage, seconds, created FROM attempts ORDER BY id DESC LIMIT 1000"),
                 "story": rows("SELECT * FROM story ORDER BY CASE key WHEN 'common' THEN 0 WHEN 'complication' THEN 1 "

@@ -79,6 +79,10 @@ Based on Lange & Pfarrer (2017, *AMR*), "Sense and structure":
 
 At the top of the 5C story tab, the title is rated Easy / Medium / Hard like a password meter: word segmentation (Chinese lexicon + bigrams), automatic Chinese → English translation (AI → MyMemory → built-in glossary), overlap with published work in Taiwan and abroad via OpenAlex (≥70% crowded, 50–70% done before, 30–50% partial, <30% rare), and a story score — why this topic, what it enables, who it helps. Without the online comparison the level is capped at Medium. The online check sends the title to OpenAlex and the translator; untick it to stay offline.
 
+## Introduction check
+
+After Grant & Pollock (2011), “Setting the hook”: why you started, the three questions an introduction answers (mapped to your 5C sentences), automatic checks for the three pitfalls reviewers name most (failing to motivate and problematize, lack of focus, overpromising), opening type, establishing and problematizing the field (Locke & Golden-Biddle, 1997), contribution type, rewriting methods, and an introduction draft checked for the five mini-abstract elements with a version counter. Uploads fill the draft from chapter 1.
+
 ## Research design check
 
 The Design check tab follows Bono & McNamara (2011): five pre-submission design questions, the conditions for a causal claim, and automatic warnings from each variable's measurement source, wave and the three control-variable judgments.

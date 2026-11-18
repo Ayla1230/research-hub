@@ -118,6 +118,10 @@ class App:
         new_story = {k: v for k, v in story.items() if k not in filled} if research_doc else {}
         for key, sentence in new_story.items():
             ops.append({"op": "update", "entity": "story", "match": {"key": key}, "data": {"sentence": sentence[:600]}})
+        hook = snap.get("hook") or {}
+        intro = integ.infer_intro(text) if research_doc and hook.get("id") and not (hook.get("intro") or "").strip() else ""
+        if intro:
+            ops.append({"op": "update", "entity": "hook", "match": {"key": "main"}, "data": {"intro": intro}})
         current = snap.get("design") or {}
         new_design = {k: v for k, v in design.items() if not current.get(k)} if research_doc else {}
         if new_design:
@@ -127,7 +131,7 @@ class App:
         zh = settings.get("language") != "en"
         sentences = "；".join(found.get("sentences", [])[:3])[:600]
         extras = [(f"5C {len(new_story)} 句" if zh else f"{len(new_story)} story sentences") if new_story else "",
-                  ("研究設計" if zh else "design profile") if new_design else "", ("論文題目" if zh else "thesis title") if set_title else ""]
+                  ("研究設計" if zh else "design profile") if new_design else "", ("緒論草稿" if zh else "introduction draft") if intro else "", ("論文題目" if zh else "thesis title") if set_title else ""]
         extras = [x for x in extras if x]
         if zh:
             how = "AI 助理" if used_ai else {"rules": "文中的假設句", "title": "題目或研究目的", "roles": "文中對各變數角色的說明"}.get(found["method"], found["method"])
