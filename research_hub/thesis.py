@@ -246,10 +246,32 @@ def build(snapshot: dict, raw: dict | None = None) -> bytes:
         for h in hypotheses:
             for line in _paras(h):
                 P(line)
+        grounding = snapshot.get("grounding") or {}
+        if (grounding.get("positioning") or "").strip():
+            for line in _paras(grounding["positioning"]):
+                P(line)
+        argued = any((r.get(k) or "").strip() for r in relations for k in ("theory", "evidence", "logic"))
         for r in relations:
             a, b = by_id.get(r["source_id"]), by_id.get(r["target_id"])
-            if a and b and r.get("label") and not hypotheses:
-                P(f"{r['label']}：{name(a)} → {name(b)}" + (f"（{r['sign']}）" if r.get("sign") else ""))
+            if not (a and b):
+                continue
+            if argued:  # theory → evidence → explanatory logic, then the hypothesis itself
+                if (r.get("theory") or "").strip():
+                    P(L(f"依據{r['theory'].strip()}，", f"Drawing on {r['theory'].strip()}, ") + L(f"{name(a)}與{name(b)}之間的關係可說明如下。", f"the relation between {name(a)} and {name(b)} can be explained as follows."))
+                for k in ("evidence", "logic"):
+                    for line in _paras(r.get(k)):
+                        P(line)
+                if (r.get("context") or "").strip():
+                    P(L("此推論適用於", "This reasoning applies to ") + r["context"].strip() + L("。", "."))
+            if r.get("label") and (argued or not hypotheses):
+                sign = {"+": L("正向", "positively"), "-": L("負向", "negatively")}.get(r.get("sign"), "")
+                if r["kind"] == "moderates":
+                    base = next((x for x in relations if x["id"] == r.get("moderates_id")), None)
+                    bx, by_ = (by_id.get(base["source_id"]), by_id.get(base["target_id"])) if base else (None, None)
+                    text = L(f"{name(a)}調節{name(bx)}與{name(by_)}之間的關係。", f"{name(a)} moderates the relationship between {name(bx)} and {name(by_)}.") if bx and by_ else f"{name(a)} → {name(b)}"
+                else:
+                    text = L(f"{name(a)}對{name(b)}有{sign}影響。", f"{name(a)} {sign + ' ' if sign else ''}affects {name(b)}.")
+                body.append(para(runs=run(f"{r['label']}：" if not en else f"{r['label']}: ", bold=True) + run(text), style=BODY_ID, indent=0))
 
     # ---- chapter 3
     chapter(3, "研究方法", "Method")

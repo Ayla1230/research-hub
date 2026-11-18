@@ -993,3 +993,22 @@ body[data-section]:not([data-section="home"]) .band { padding-top: 32px; }
 .hk .toolbar { margin: 10px 0 0; } .hk .toolbar > .btn { margin-left: 0; }
 @media (max-width: 1000px) { .hk-pits { grid-template-columns: 1fr; } }
 @media (max-width: 800px) { .hk-two, .hk-q3-c { grid-template-columns: 1fr; } }
+
+/* ---------- hypothesis grounding ---------- */
+.gr .card { margin-bottom: 16px; }
+.gr h3.mini { margin: 6px 0 12px; }
+.gr-three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+.gr-three-i { display: grid; gap: 4px; padding: 10px 14px; border-radius: 12px; background: var(--bg-soft); font-size: 13px; }
+.gr-three-i span { color: var(--muted); }
+.gr-paths { display: grid; gap: 10px; margin-bottom: 12px; }
+.gr-path { border: 1px solid var(--line); border-radius: 14px; background: #fff; padding: 0 16px; border-left: 3px solid var(--ok); }
+.gr-path.issue { border-left-color: var(--bad); }
+.gr-path > summary { display: flex; gap: 10px; align-items: center; padding: 12px 0; cursor: pointer; list-style: none; }
+.gr-path > summary::-webkit-details-marker { display: none; }
+.gr-path > summary .pill { margin-left: auto; }
+.gr-path[open] { padding-bottom: 14px; }
+.gr-flow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.gr-step { display: grid; gap: 6px; } .gr-step.main { grid-column: 1 / -1; }
+.gr .lbl { font-size: 12px; color: var(--muted); }
+.gr-step.main .lbl { color: var(--ink); font-weight: 600; }
+@media (max-width: 800px) { .gr-three, .gr-flow { grid-template-columns: 1fr; } }

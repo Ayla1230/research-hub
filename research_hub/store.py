@@ -37,6 +37,7 @@ MEASURE_SOURCES = ("", "self", "supervisor", "peer", "objective", "manipulated",
 DESIGN_PURPOSES = ("", "describe", "change", "causal")
 DESIGN_TYPES = ("", "cross_sectional", "longitudinal", "experiment")
 CHECK_STATUS = ("", "ok", "issue")
+THEORY_STRATEGY = ("", "single", "competing", "combining", "integrating")
 HOOK_TYPES = ("", "trend", "quote")
 ESTABLISH = ("", "synthesized", "progressive", "noncoherence")
 PROBLEMATIZE = ("", "incompleteness", "inadequacy", "incommensurability")
@@ -168,8 +169,21 @@ ENTITIES: dict[str, dict] = {
             "source_id": ("ref", "variable"), "target_id": ("ref", "variable"),
             "kind": ("enum", RELATION_KINDS), "moderates_id": ("ref?", "relation"),
             "sign": ("enum", SIGNS), "label": ("str", None), "note": ("text", None), "position": ("int", None),
+            # grounding the hypothesis (Sparrowe & Mayer, 2011): theory, evidence and, above all, explanatory logic
+            "theory": ("str", None), "evidence": ("text", None), "logic": ("text", None),
+            "context": ("str", None), "alt": ("text", None),
         },
         "required": ("source_id", "target_id"),
+    },
+    "grounding": {  # the theory section as a whole; fixed row, key "main"
+        "table": "grounding",
+        "fields": {
+            "key": ("str", None), "main_theory": ("str", None), "strategy": ("enum", THEORY_STRATEGY),
+            "strategy_reason": ("text", None), "positioning": ("text", None), "why_these": ("text", None),
+            **{f"c{i}_status": ("enum", CHECK_STATUS) for i in range(1, 7)},
+        },
+        "required": ("key",),
+        "fixed": True,
     },
     "resource": {
         "table": "resources",
@@ -299,6 +313,13 @@ CREATE TABLE IF NOT EXISTS story (
   id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, sentence TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
   created TEXT NOT NULL, updated TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS grounding (
+  id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, main_theory TEXT NOT NULL DEFAULT '', strategy TEXT NOT NULL DEFAULT '',
+  strategy_reason TEXT NOT NULL DEFAULT '', positioning TEXT NOT NULL DEFAULT '', why_these TEXT NOT NULL DEFAULT '',
+  c1_status TEXT NOT NULL DEFAULT '', c2_status TEXT NOT NULL DEFAULT '', c3_status TEXT NOT NULL DEFAULT '',
+  c4_status TEXT NOT NULL DEFAULT '', c5_status TEXT NOT NULL DEFAULT '', c6_status TEXT NOT NULL DEFAULT '',
+  created TEXT NOT NULL, updated TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS hook (
   id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, origin TEXT NOT NULL DEFAULT '', intro TEXT NOT NULL DEFAULT '',
   versions INTEGER NOT NULL DEFAULT 0, hook_type TEXT NOT NULL DEFAULT '', establish TEXT NOT NULL DEFAULT '',
@@ -423,6 +444,11 @@ class Store:
             stamp = now()
             db.execute("INSERT OR IGNORE INTO topic (key, created, updated) VALUES ('main', ?, ?)", (stamp, stamp))
             db.execute("INSERT OR IGNORE INTO hook (key, created, updated) VALUES ('main', ?, ?)", (stamp, stamp))
+            db.execute("INSERT OR IGNORE INTO grounding (key, created, updated) VALUES ('main', ?, ?)", (stamp, stamp))
+            rel_cols = {r["name"] for r in db.execute("PRAGMA table_info(relations)")}
+            for col in ("theory", "evidence", "logic", "context", "alt"):
+                if col not in rel_cols:
+                    db.execute(f"ALTER TABLE relations ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
             for key in FIVE_C:
                 db.execute("INSERT OR IGNORE INTO story (key, created, updated) VALUES (?, ?, ?)", (key, stamp, stamp))
             db.execute("INSERT OR IGNORE INTO design (key, created, updated) VALUES ('main', ?, ?)", (stamp, stamp))
@@ -578,6 +604,7 @@ class Store:
                 "design": (rows("SELECT * FROM design WHERE key='main'") or [{}])[0],
                 "topic": (rows("SELECT * FROM topic WHERE key='main'") or [{}])[0],
                 "hook": (rows("SELECT * FROM hook WHERE key='main'") or [{}])[0],
+                "grounding": (rows("SELECT * FROM grounding WHERE key='main'") or [{}])[0],
                 "questions": rows("SELECT * FROM questions ORDER BY folder, position, id"),
                 "attempts": rows("SELECT id, question_id, score, coverage, seconds, created FROM attempts ORDER BY id DESC LIMIT 1000"),
                 "story": rows("SELECT * FROM story ORDER BY CASE key WHEN 'common' THEN 0 WHEN 'complication' THEN 1 "

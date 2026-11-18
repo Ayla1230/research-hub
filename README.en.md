@@ -83,6 +83,10 @@ At the top of the 5C story tab, the title is rated Easy / Medium / Hard like a p
 
 After Grant & Pollock (2011), “Setting the hook”: why you started, the three questions an introduction answers (mapped to your 5C sentences), automatic checks for the three pitfalls reviewers name most (failing to motivate and problematize, lack of focus, overpromising), opening type, establishing and problematizing the field (Locke & Golden-Biddle, 1997), contribution type, rewriting methods, and an introduction draft checked for the five mini-abstract elements with a version counter. Uploads fill the draft from chapter 1.
 
+## Hypothesis check
+
+After Sparrowe & Mayer (2011), “Grounding hypotheses”: every path gets established theory, evidence from similar settings and explanatory logic, plus context and whether a reverse or null relation is plausible. Checks flag missing logic, citation stacking, generic theories, fragmented theorizing, variables with no linked papers, hypotheses outside the research questions, unexplained variable choice and multiple theories without a strategy. A six-item checklist closes the tab, and the Word export writes the arguments before each hypothesis.
+
 ## Research design check
 
 The Design check tab follows Bono & McNamara (2011): five pre-submission design questions, the conditions for a causal claim, and automatic warnings from each variable's measurement source, wave and the three control-variable judgments.

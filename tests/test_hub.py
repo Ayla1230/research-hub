@@ -1032,6 +1032,24 @@ class TopicThesisTests(unittest.TestCase):
         self.assertTrue(intro.startswith("近年來") and "文獻內容" not in intro)
         self.assertEqual(integ.infer_intro("沒有章節的短文"), "")
 
+    def test_grounding_and_hypothesis_arguments_in_word(self):
+        import zipfile
+        store = Store(Path(tempfile.mkdtemp()))
+        self.assertEqual(store.snapshot()["grounding"]["key"], "main")
+        with self.assertRaises(ValidationError):
+            store.apply_ops([{"op": "update", "entity": "grounding", "match": {"key": "main"}, "data": {"strategy": "collage"}}])
+        store.apply_ops([
+            {"op": "create", "entity": "variable", "ref": "x", "data": {"symbol": "X1", "role": "iv", "name_zh": "主管支持"}},
+            {"op": "create", "entity": "variable", "ref": "y", "data": {"symbol": "Y1", "role": "dv", "name_zh": "建言行為"}},
+            {"op": "create", "entity": "relation", "data": {"source_id": "$x", "target_id": "$y", "kind": "effect", "sign": "+", "label": "H1",
+             "theory": "社會交換理論", "logic": "主管支持讓員工感到被重視，因而產生回報的義務，更願意提出改善建議。", "context": "台灣服務業"}},
+            {"op": "update", "entity": "grounding", "match": {"key": "main"}, "data": {"strategy": "single", "positioning": "本研究延伸建言行為的前因研究。"}}])
+        snap = store.snapshot()
+        self.assertEqual(snap["relations"][0]["theory"], "社會交換理論")
+        doc = zipfile.ZipFile(io.BytesIO(thesis.build(snap, {}))).read("word/document.xml").decode()
+        for text in ("依據社會交換理論", "產生回報的義務", "台灣服務業", "H1：", "主管支持對建言行為有正向影響", "延伸建言行為"):
+            self.assertIn(text, doc)
+
     def test_voice_rejects_empty_and_unknown(self):
         with self.assertRaises(voice.VoiceError):
             voice._clean("  ")

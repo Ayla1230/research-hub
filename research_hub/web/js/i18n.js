@@ -239,7 +239,7 @@
     f_module: ["模組", "Module"], f_key: ["代號", "Key"], f_name: ["名稱", "Name"], f_kind: ["類型", "Kind"], f_target: ["目標", "Target"],
     e_stage: ["階段", "Stage"], e_task: ["待辦", "Task"], e_rq: ["研究問題", "RQ"], e_variable: ["變數", "Variable"],
     e_paper: ["文獻", "Paper"], e_resource: ["資源", "Resource"], show_less: ["收合", "Show less"],
-    tab_hook: ["緒論檢核", "Introduction check"], tab_design: ["研究設計檢核", "Design check"], variable: ["變數", "Variable"],
+    tab_hook: ["緒論檢核", "Introduction check"], tab_grounding: ["假設檢核", "Hypothesis check"], tab_design: ["研究設計檢核", "Design check"], variable: ["變數", "Variable"],
     dz_intro: ["蒐集資料之前，先想清楚這五個問題（Bono & McNamara, 2011）。系統會依你填的變數、路徑與設計自動提醒，最後由你判斷。", "Think these five questions through before collecting data (Bono & McNamara, 2011). The hub flags issues from your variables, paths and design; you make the call."],
     dz_issues: ["{n} 項待處理", "{n} to resolve"], dz_no_issues: ["未發現問題", "No issues found"],
     dz_profile: ["設計概況", "Design profile"], dz_purpose: ["研究目的", "Research purpose"], dz_design: ["資料設計", "Data design"],
